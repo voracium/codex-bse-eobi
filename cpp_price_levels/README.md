@@ -39,7 +39,7 @@ Updates use only message fields needed for aggregated levels:
 
 ```bash
 g++ -std=c++20 -O3 -Wall -Wextra \
-  -I bse-eobi/cpp_price_levels/include \
-  bse-eobi/cpp_price_levels/tests/test_basic_price_levels.cpp \
+  -I cpp_price_levels/include \
+  cpp_price_levels/tests/test_basic_price_levels.cpp \
   -o /tmp/test_basic_price_levels && /tmp/test_basic_price_levels
 ```

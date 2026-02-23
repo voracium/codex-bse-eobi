@@ -1,4 +1,5 @@
 #include <array>
+#include <algorithm>
 #include <cassert>
 #include <charconv>
 #include <cstdint>
@@ -45,6 +46,11 @@ struct SnapshotRow {
         return a.seq_num == b.seq_num && a.type == b.type && a.bid_size == b.bid_size &&
                a.bid_px == b.bid_px && a.ask_px == b.ask_px && a.ask_size == b.ask_size;
     }
+};
+
+struct ReplayResult {
+    std::vector<SnapshotRow> rows;
+    std::vector<std::int64_t> latencies_ns;
 };
 
 std::vector<std::string_view> split_view(std::string_view s, char delim) {
@@ -133,16 +139,16 @@ std::vector<SnapshotRow> load_reference_csv(const std::string& path) {
     return rows;
 }
 
-std::vector<SnapshotRow> replay_raw_ticks(const std::string& path) {
+ReplayResult replay_raw_ticks(const std::string& path) {
     std::ifstream in(path);
     if (!in) {
         throw std::runtime_error("failed to open raw log: " + path);
     }
 
     PriceLevelBooks books;
-    std::vector<SnapshotRow> out;
+    ReplayResult out;
 
-    out.push_back(make_snapshot_row(0, '-', books.snapshot(kSecurityId)));
+    out.rows.push_back(make_snapshot_row(0, '-', books.snapshot(kSecurityId)));
 
     std::string line;
     while (std::getline(in, line)) {
@@ -248,7 +254,18 @@ std::vector<SnapshotRow> replay_raw_ticks(const std::string& path) {
         if (type == '\0' || !maybe_top.has_value()) {
             continue;
         }
-        out.push_back(make_snapshot_row(seq, type, *maybe_top));
+        out.rows.push_back(make_snapshot_row(seq, type, *maybe_top));
+
+        const auto sec_start = static_cast<std::int64_t>(maybe_top->tsec[2]);
+        const auto nsec_start = static_cast<std::int64_t>(maybe_top->tnsec[2]);
+        const auto sec_end = static_cast<std::int64_t>(maybe_top->tsec[3]);
+        const auto nsec_end = static_cast<std::int64_t>(maybe_top->tnsec[3]);
+        if (sec_start > 0 && sec_end > 0) {
+            const auto latency = ((sec_end - sec_start) * 1'000'000'000LL) + (nsec_end - nsec_start);
+            if (latency >= 0) {
+                out.latencies_ns.push_back(latency);
+            }
+        }
     }
 
     return out;
@@ -266,11 +283,30 @@ void print_row(const SnapshotRow& r, const char* label) {
 }  // namespace
 
 int main() {
-    const std::string raw = "bse-eobi/cpp_price_levels/testcases/504212_raw_ticks.log";
-    const std::string ref = "bse-eobi/cpp_price_levels/testcases/dinfra_tbt_504212.csv";
+    const std::string raw = "cpp_price_levels/testcases/504212_raw_ticks.log";
+    const std::string ref = "cpp_price_levels/testcases/dinfra_tbt_504212.csv";
 
     const auto expected = load_reference_csv(ref);
-    const auto actual = replay_raw_ticks(raw);
+    const auto actual_result = replay_raw_ticks(raw);
+    const auto& actual = actual_result.rows;
+
+    if (!actual_result.latencies_ns.empty()) {
+        auto lats = actual_result.latencies_ns;
+        std::sort(lats.begin(), lats.end());
+        std::int64_t total = 0;
+        for (const auto v : lats) {
+            total += v;
+        }
+        const auto idx = [&](double p) -> std::size_t {
+            return static_cast<std::size_t>(p * static_cast<double>(lats.size() - 1));
+        };
+        std::cout << "MTICK latency from t[2]->t[3] (ns): "
+                  << "count=" << lats.size() << " avg=" << (total / static_cast<std::int64_t>(lats.size()))
+                  << " min=" << lats.front() << " p50=" << lats[idx(0.50)] << " p90=" << lats[idx(0.90)]
+                  << " p99=" << lats[idx(0.99)] << " max=" << lats.back() << "\n";
+    } else {
+        std::cout << "MTICK latency from t[2]->t[3] (ns): no samples\n";
+    }
 
     using Key = std::tuple<std::int64_t, char>;
     struct KeyHash {

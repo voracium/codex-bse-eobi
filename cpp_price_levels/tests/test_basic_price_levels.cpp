@@ -127,6 +127,20 @@ void test_mass_delete() {
     assert(out->ask_size[0] == 0);
 }
 
+void test_mtick_timestamps_set_on_publish() {
+    PriceLevelBooks books;
+    auto out = books.apply(AddOrder{.security_id = 1, .side = Side::Buy, .price = 100, .display_qty = 10});
+    assert(out.has_value());
+    assert(out->tsec[0] == 0);
+    assert(out->tnsec[0] == 0);
+    assert(out->tsec[1] == 0);
+    assert(out->tnsec[1] == 0);
+    assert(out->tsec[2] > 0);
+    assert(out->tnsec[2] >= 0);
+    assert(out->tsec[3] > 0);
+    assert(out->tnsec[3] >= 0);
+}
+
 }  // namespace
 
 int main() {
@@ -136,5 +150,6 @@ int main() {
     test_delete_and_exec();
     test_publish_only_when_top_n_changes();
     test_mass_delete();
+    test_mtick_timestamps_set_on_publish();
     return 0;
 }

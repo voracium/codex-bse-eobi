@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -165,7 +166,19 @@ class InstrumentBook {
 
     const MTICK& mtick() const noexcept { return mtick_; }
 
+    void mark_processing_start() { mark_timestamp_at(2); }
+
+    void mark_publish_time() { mark_timestamp_at(3); }
+
    private:
+    void mark_timestamp_at(std::size_t idx) {
+        const auto now = std::chrono::system_clock::now().time_since_epoch();
+        const auto secs = std::chrono::duration_cast<std::chrono::seconds>(now);
+        const auto nsecs = std::chrono::duration_cast<std::chrono::nanoseconds>(now - secs);
+        mtick_.tsec[idx] = static_cast<int>(secs.count());
+        mtick_.tnsec[idx] = static_cast<int>(nsecs.count());
+    }
+
     using LevelsMap = std::map<std::int64_t, std::int64_t>;
 
     static void apply_delta(LevelsMap& levels, std::int64_t price, std::int64_t delta) {
@@ -421,37 +434,45 @@ class PriceLevelBooks {
    public:
     std::optional<MTICK> apply(const AddOrder& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_processing_start();
         book.add(msg.side, msg.price, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
             return std::nullopt;
         }
+        book.mark_publish_time();
         return book.mtick();
     }
 
     std::optional<MTICK> apply(const ModifyOrder& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_processing_start();
         book.modify(msg.side, msg.prev_price, msg.prev_display_qty, msg.price, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.prev_price, msg.price)) {
             return std::nullopt;
         }
+        book.mark_publish_time();
         return book.mtick();
     }
 
     std::optional<MTICK> apply(const ModifyOrderSamePriority& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_processing_start();
         book.modify_same_priority(msg.side, msg.price, msg.prev_display_qty, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
             return std::nullopt;
         }
+        book.mark_publish_time();
         return book.mtick();
     }
 
     std::optional<MTICK> apply(const DeleteOrder& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_processing_start();
         book.remove(msg.side, msg.price, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
             return std::nullopt;
         }
+        book.mark_publish_time();
         return book.mtick();
     }
 
@@ -461,19 +482,23 @@ class PriceLevelBooks {
 
     std::optional<MTICK> apply(const PartialOrderExecution& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_processing_start();
         book.partial_exec(msg.side, msg.last_px, msg.last_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.last_px)) {
             return std::nullopt;
         }
+        book.mark_publish_time();
         return book.mtick();
     }
 
     std::optional<MTICK> apply(const FullOrderExecution& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_processing_start();
         book.full_exec(msg.side, msg.last_px, msg.last_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.last_px)) {
             return std::nullopt;
         }
+        book.mark_publish_time();
         return book.mtick();
     }
 
@@ -501,10 +526,12 @@ class PriceLevelBooks {
     std::optional<MTICK> apply_with_change(std::int64_t security_id, bool refresh_bids, bool refresh_asks,
                                            Mutator&& mutator) {
         auto& book = ensure_book(security_id);
+        book.mark_processing_start();
         mutator(book);
         if (!book.refresh_mtick(refresh_bids, refresh_asks)) {
             return std::nullopt;
         }
+        book.mark_publish_time();
         return book.mtick();
     }
 
