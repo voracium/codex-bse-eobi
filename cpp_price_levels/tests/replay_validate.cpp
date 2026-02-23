@@ -348,7 +348,7 @@ void print_latency_stats(const char* label, const std::vector<std::int64_t>& sam
     std::cout << label << ": "
               << "count=" << lats.size() << " avg=" << (total / static_cast<std::int64_t>(lats.size()))
               << " min=" << lats.front() << " p50=" << lats[idx(0.50)] << " p90=" << lats[idx(0.90)]
-              << " p99=" << lats[idx(0.99)] << " max=" << lats.back() << "\n";
+              << " p95=" << lats[idx(0.95)] << " p99=" << lats[idx(0.99)] << " max=" << lats.back() << "\n";
 }
 
 void print_row(const Row& r, const char* label) {

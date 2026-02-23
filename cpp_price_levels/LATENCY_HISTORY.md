@@ -1,0 +1,34 @@
+# Latency History
+
+Measured as `MTICK t[3] - t[2]` in nanoseconds from `tests/replay_validate.cpp`.
+
+Dataset used unless noted:
+- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
+- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
+- mode: `strict`
+
+Machine details:
+- host/kernel: `Linux irage-ThinkCentre-neo-50q-Gen-4 6.17.0-14-generic x86_64`
+- CPU: `13th Gen Intel(R) Core(TM) i5-13420H` (`12` logical CPUs, `8` cores, max `4.6 GHz`)
+- memory: `30 GiB RAM`, `8 GiB swap`
+- compiler: `g++ (Ubuntu 15.2.0-4ubuntu4) 15.2.0`
+
+## Entries
+
+### 2026-02-23T18:05:04+05:30 | commit `c19361f`
+
+| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| overall | 952656 | 117 | 17 | 98 | 211 | 247 | 311 | 10953 |
+| N | 295058 | 87 | 19 | 81 | 145 | 166 | 204 | 6427 |
+| M | 339289 | 165 | 20 | 162 | 261 | 289 | 343 | 10953 |
+| X | 307444 | 93 | 20 | 84 | 158 | 174 | 205 | 4684 |
+| F | 2817 | 128 | 20 | 130 | 208 | 238 | 350 | 708 |
+| T | 3561 | 50 | 19 | 29 | 92 | 115 | 220 | 1910 |
+| E | 4487 | 101 | 17 | 80 | 213 | 250 | 340 | 9203 |
+
+| Validation Metric | Value |
+|---|---:|
+| mismatches | 36 |
+| missing | 4 |
+| extra_actual | 6433 |
