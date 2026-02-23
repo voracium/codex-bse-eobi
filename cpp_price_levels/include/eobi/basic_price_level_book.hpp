@@ -39,6 +39,8 @@ enum class SecTrdStatus : std::uint8_t {
     Closed = 2,
     OpeningAuction = 3,
     Continuous = 4,
+    OpeningAuctionFreeze = 5,
+    IntradayAuctionFreeze = 6,
 };
 
 class MTICK {
@@ -110,6 +112,7 @@ struct PartialOrderExecution {
     std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
+    std::int64_t price{};
     std::int64_t last_px{};
     std::int64_t last_qty{};
 };
@@ -118,6 +121,7 @@ struct FullOrderExecution {
     std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
+    std::int64_t price{};
     std::int64_t last_px{};
     std::int64_t last_qty{};
 };
@@ -190,6 +194,10 @@ class InstrumentBook {
     }
 
     bool is_continuous_trading() const noexcept { return sec_trd_status_ == SecTrdStatus::Continuous; }
+    bool is_auction_freeze() const noexcept {
+        return sec_trd_status_ == SecTrdStatus::OpeningAuctionFreeze ||
+               sec_trd_status_ == SecTrdStatus::IntradayAuctionFreeze;
+    }
     bool is_price_within_circuit(std::int64_t price) const noexcept {
         if (!has_circuit_limits_) {
             return true;
@@ -632,8 +640,9 @@ class PriceLevelBooks {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
-        book.partial_exec(msg.side, msg.last_px, msg.last_qty);
-        if (!book.refresh_mtick_incremental(msg.side, msg.last_px)) {
+        const auto exec_px = (book.is_auction_freeze() && msg.price != 0) ? msg.price : msg.last_px;
+        book.partial_exec(msg.side, exec_px, msg.last_qty);
+        if (!book.refresh_mtick_incremental(msg.side, exec_px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -644,8 +653,9 @@ class PriceLevelBooks {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
-        book.full_exec(msg.side, msg.last_px, msg.last_qty);
-        if (!book.refresh_mtick_incremental(msg.side, msg.last_px)) {
+        const auto exec_px = (book.is_auction_freeze() && msg.price != 0) ? msg.price : msg.last_px;
+        book.full_exec(msg.side, exec_px, msg.last_qty);
+        if (!book.refresh_mtick_incremental(msg.side, exec_px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
