@@ -26,6 +26,21 @@ enum class Side : std::uint8_t {
     Sell = 2,
 };
 
+enum class SecurityStatus : std::uint8_t {
+    Unknown = 0,
+    Active = 1,
+    Suspended = 2,
+    Inactive = 3,
+};
+
+enum class SecTrdStatus : std::uint8_t {
+    Unknown = 0,
+    Restricted = 1,
+    Closed = 2,
+    OpeningAuction = 3,
+    Continuous = 4,
+};
+
 class MTICK {
    public:
     SymbolIdType id{};
@@ -115,6 +130,20 @@ struct ExecutionSummary {
     std::int64_t last_qty{};
 };
 
+struct InstrumentInfo {
+    std::uint32_t seq_no{};
+    std::int64_t security_id{};
+    std::int64_t upper_ckt_lmt{};
+    std::int64_t lower_ckt_lmt{};
+};
+
+struct InstrumentStateChange {
+    std::uint32_t seq_no{};
+    std::int64_t security_id{};
+    SecurityStatus security_status{SecurityStatus::Unknown};
+    SecTrdStatus sec_trd_status{SecTrdStatus::Unknown};
+};
+
 class InstrumentBook {
    public:
     InstrumentBook() {
@@ -147,6 +176,25 @@ class InstrumentBook {
     void clear() {
         bids_.clear();
         asks_.clear();
+    }
+
+    void update_instrument_info(const InstrumentInfo& info) {
+        upper_circuit_limit_ = info.upper_ckt_lmt;
+        lower_circuit_limit_ = info.lower_ckt_lmt;
+        has_circuit_limits_ = true;
+    }
+
+    void update_instrument_state(const InstrumentStateChange& state) {
+        security_status_ = state.security_status;
+        sec_trd_status_ = state.sec_trd_status;
+    }
+
+    bool is_continuous_trading() const noexcept { return sec_trd_status_ == SecTrdStatus::Continuous; }
+    bool is_price_within_circuit(std::int64_t price) const noexcept {
+        if (!has_circuit_limits_) {
+            return true;
+        }
+        return price >= lower_circuit_limit_ && price <= upper_circuit_limit_;
     }
 
     bool refresh_mtick(bool refresh_bids, bool refresh_asks) {
@@ -285,6 +333,9 @@ class InstrumentBook {
     }
 
     void apply_delta(Side side, std::int64_t price, std::int64_t delta) {
+        if (!is_price_within_circuit(price)) {
+            return;
+        }
         if (side == Side::Buy) {
             apply_delta(bids_, price, delta);
             return;
@@ -516,6 +567,11 @@ class InstrumentBook {
     bool has_tentative_mtick_{false};
     std::uint32_t seq_no_{0};
     std::uint32_t tentative_seq_no_{0};
+    bool has_circuit_limits_{false};
+    std::int64_t upper_circuit_limit_{0};
+    std::int64_t lower_circuit_limit_{0};
+    SecurityStatus security_status_{SecurityStatus::Unknown};
+    SecTrdStatus sec_trd_status_{SecTrdStatus::Unknown};
 };
 
 class PriceLevelBooks {
@@ -599,8 +655,25 @@ class PriceLevelBooks {
     std::optional<MTICK> apply(const ExecutionSummary& msg) {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
+        if (!book.is_continuous_trading()) {
+            return std::nullopt;
+        }
         const auto& tentative = book.apply_execution_summary_tentative(msg);
         return tentative;
+    }
+
+    std::optional<MTICK> apply(const InstrumentInfo& msg) {
+        auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
+        book.update_instrument_info(msg);
+        return std::nullopt;
+    }
+
+    std::optional<MTICK> apply(const InstrumentStateChange& msg) {
+        auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
+        book.update_instrument_state(msg);
+        return std::nullopt;
     }
 
     MTICK snapshot(std::int64_t security_id) const {
