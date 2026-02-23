@@ -52,6 +52,7 @@ class MTICK {
 };
 
 struct AddOrder {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
     std::int64_t price{};
@@ -59,6 +60,7 @@ struct AddOrder {
 };
 
 struct ModifyOrder {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
     std::int64_t prev_price{};
@@ -68,6 +70,7 @@ struct ModifyOrder {
 };
 
 struct ModifyOrderSamePriority {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
     std::int64_t price{};
@@ -76,6 +79,7 @@ struct ModifyOrderSamePriority {
 };
 
 struct DeleteOrder {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
     std::int64_t price{};
@@ -83,10 +87,12 @@ struct DeleteOrder {
 };
 
 struct MassDelete {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
 };
 
 struct PartialOrderExecution {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
     std::int64_t last_px{};
@@ -94,6 +100,7 @@ struct PartialOrderExecution {
 };
 
 struct FullOrderExecution {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
     Side side{};
     std::int64_t last_px{};
@@ -101,6 +108,7 @@ struct FullOrderExecution {
 };
 
 struct ExecutionSummary {
+    std::uint32_t seq_no{};
     std::int64_t security_id{};
 };
 
@@ -169,6 +177,16 @@ class InstrumentBook {
     void mark_processing_start() { mark_timestamp_at(2); }
 
     void mark_publish_time() { mark_timestamp_at(3); }
+
+    void mark_seq(std::uint32_t seq_no) noexcept {
+        if (seq_no > 0) {
+            seq_no_ = seq_no;
+            mtick_.seqNo = seq_no_;
+            return;
+        }
+        ++seq_no_;
+        mtick_.seqNo = seq_no_;
+    }
 
    private:
     void mark_timestamp_at(std::size_t idx) {
@@ -428,12 +446,14 @@ class InstrumentBook {
     LevelsMap bids_;
     LevelsMap asks_;
     MTICK mtick_{};
+    std::uint32_t seq_no_{0};
 };
 
 class PriceLevelBooks {
    public:
     std::optional<MTICK> apply(const AddOrder& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         book.add(msg.side, msg.price, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
@@ -445,6 +465,7 @@ class PriceLevelBooks {
 
     std::optional<MTICK> apply(const ModifyOrder& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         book.modify(msg.side, msg.prev_price, msg.prev_display_qty, msg.price, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.prev_price, msg.price)) {
@@ -456,6 +477,7 @@ class PriceLevelBooks {
 
     std::optional<MTICK> apply(const ModifyOrderSamePriority& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         book.modify_same_priority(msg.side, msg.price, msg.prev_display_qty, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
@@ -467,6 +489,7 @@ class PriceLevelBooks {
 
     std::optional<MTICK> apply(const DeleteOrder& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         book.remove(msg.side, msg.price, msg.display_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
@@ -477,11 +500,12 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const MassDelete& msg) {
-        return apply_with_change(msg.security_id, true, true, [](InstrumentBook& book) { book.clear(); });
+        return apply_with_change(msg.security_id, true, true, msg.seq_no, [](InstrumentBook& book) { book.clear(); });
     }
 
     std::optional<MTICK> apply(const PartialOrderExecution& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         book.partial_exec(msg.side, msg.last_px, msg.last_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.last_px)) {
@@ -493,6 +517,7 @@ class PriceLevelBooks {
 
     std::optional<MTICK> apply(const FullOrderExecution& msg) {
         auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         book.full_exec(msg.side, msg.last_px, msg.last_qty);
         if (!book.refresh_mtick_incremental(msg.side, msg.last_px)) {
@@ -502,7 +527,11 @@ class PriceLevelBooks {
         return book.mtick();
     }
 
-    std::optional<MTICK> apply(const ExecutionSummary&) { return std::nullopt; }
+    std::optional<MTICK> apply(const ExecutionSummary& msg) {
+        auto& book = ensure_book(msg.security_id);
+        book.mark_seq(msg.seq_no);
+        return std::nullopt;
+    }
 
     MTICK snapshot(std::int64_t security_id) const {
         const auto it = books_.find(security_id);
@@ -524,8 +553,9 @@ class PriceLevelBooks {
 
     template <typename Mutator>
     std::optional<MTICK> apply_with_change(std::int64_t security_id, bool refresh_bids, bool refresh_asks,
-                                           Mutator&& mutator) {
+                                           std::uint32_t seq_no, Mutator&& mutator) {
         auto& book = ensure_book(security_id);
+        book.mark_seq(seq_no);
         book.mark_processing_start();
         mutator(book);
         if (!book.refresh_mtick(refresh_bids, refresh_asks)) {

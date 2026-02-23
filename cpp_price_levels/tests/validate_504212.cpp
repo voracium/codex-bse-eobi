@@ -189,6 +189,7 @@ ReplayResult replay_raw_ticks(const std::string& path) {
             type = 'N';
             maybe_top = books.apply(
                 AddOrder{
+                    .seq_no = static_cast<std::uint32_t>(seq),
                     .security_id = kSecurityId,
                     .side = parse_side(kv.at("Side")),
                     .price = to_i64(kv.at("Price")),
@@ -198,6 +199,7 @@ ReplayResult replay_raw_ticks(const std::string& path) {
             type = 'M';
             maybe_top = books.apply(
                 ModifyOrder{
+                    .seq_no = static_cast<std::uint32_t>(seq),
                     .security_id = kSecurityId,
                     .side = parse_side(kv.at("Side")),
                     .prev_price = to_i64(kv.at("PrevPrice")),
@@ -209,6 +211,7 @@ ReplayResult replay_raw_ticks(const std::string& path) {
             type = 'M';
             maybe_top = books.apply(
                 ModifyOrderSamePriority{
+                    .seq_no = static_cast<std::uint32_t>(seq),
                     .security_id = kSecurityId,
                     .side = parse_side(kv.at("Side")),
                     .price = to_i64(kv.at("Price")),
@@ -219,6 +222,7 @@ ReplayResult replay_raw_ticks(const std::string& path) {
             type = 'X';
             maybe_top = books.apply(
                 DeleteOrder{
+                    .seq_no = static_cast<std::uint32_t>(seq),
                     .security_id = kSecurityId,
                     .side = parse_side(kv.at("Side")),
                     .price = to_i64(kv.at("Price")),
@@ -226,11 +230,15 @@ ReplayResult replay_raw_ticks(const std::string& path) {
                 });
         } else if (tid == "13103") {
             type = 'X';
-            maybe_top = books.apply(MassDelete{.security_id = kSecurityId});
+            maybe_top = books.apply(MassDelete{
+                .seq_no = static_cast<std::uint32_t>(seq),
+                .security_id = kSecurityId,
+            });
         } else if (tid == "13104") {
             type = 'X';
             maybe_top = books.apply(
                 FullOrderExecution{
+                    .seq_no = static_cast<std::uint32_t>(seq),
                     .security_id = kSecurityId,
                     .side = parse_side(kv.at("Side")),
                     .last_px = to_i64(kv.at("LastPrice")),
@@ -240,6 +248,7 @@ ReplayResult replay_raw_ticks(const std::string& path) {
             type = 'X';
             maybe_top = books.apply(
                 PartialOrderExecution{
+                    .seq_no = static_cast<std::uint32_t>(seq),
                     .security_id = kSecurityId,
                     .side = parse_side(kv.at("Side")),
                     .last_px = to_i64(kv.at("LastPrice")),
@@ -247,7 +256,10 @@ ReplayResult replay_raw_ticks(const std::string& path) {
                 });
         } else if (tid == "13202") {
             type = 'E';
-            books.apply(ExecutionSummary{.security_id = kSecurityId});
+            books.apply(ExecutionSummary{
+                .seq_no = static_cast<std::uint32_t>(seq),
+                .security_id = kSecurityId,
+            });
             maybe_top = books.snapshot(kSecurityId);
         }
 
