@@ -256,11 +256,14 @@ ReplayResult replay_raw_ticks(const std::string& path) {
                 });
         } else if (tid == "13202") {
             type = 'E';
-            books.apply(ExecutionSummary{
-                .seq_no = static_cast<std::uint32_t>(seq),
-                .security_id = kSecurityId,
-            });
-            maybe_top = books.snapshot(kSecurityId);
+            maybe_top = books.apply(
+                ExecutionSummary{
+                    .seq_no = static_cast<std::uint32_t>(seq),
+                    .security_id = kSecurityId,
+                    .agg_side = parse_side(kv.at("AggSide")),
+                    .last_px = to_i64(kv.at("LastPx")),
+                    .last_qty = to_i64(kv.at("LastQty")),
+                });
         }
 
         if (type == '\0' || !maybe_top.has_value()) {

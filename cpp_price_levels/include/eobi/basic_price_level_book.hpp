@@ -110,6 +110,9 @@ struct FullOrderExecution {
 struct ExecutionSummary {
     std::uint32_t seq_no{};
     std::int64_t security_id{};
+    Side agg_side{};
+    std::int64_t last_px{};
+    std::int64_t last_qty{};
 };
 
 class InstrumentBook {
@@ -178,6 +181,8 @@ class InstrumentBook {
 
     void mark_publish_time() { mark_timestamp_at(3); }
 
+    const MTICK& published_view() const noexcept { return (has_tentative_mtick_ && tentative_seq_no_ == seq_no_) ? tentative_mtick_ : mtick_; }
+
     void mark_seq(std::uint32_t seq_no) noexcept {
         if (seq_no > 0) {
             seq_no_ = seq_no;
@@ -188,16 +193,77 @@ class InstrumentBook {
         mtick_.seqNo = seq_no_;
     }
 
+    const MTICK& apply_execution_summary_tentative(const ExecutionSummary& msg) {
+        tentative_mtick_ = mtick_;
+        mark_timestamp_at(tentative_mtick_, 2);
+
+        const bool reduce_bids = msg.agg_side == Side::Sell;
+        if (reduce_bids) {
+            fill_tentative_side_from_levels(bids_, true, msg.last_qty, tentative_mtick_.bid, tentative_mtick_.bid_size);
+        } else {
+            fill_tentative_side_from_levels(asks_, false, msg.last_qty, tentative_mtick_.ask, tentative_mtick_.ask_size);
+        }
+
+        mark_timestamp_at(tentative_mtick_, 3);
+        has_tentative_mtick_ = true;
+        tentative_seq_no_ = seq_no_;
+        return tentative_mtick_;
+    }
+
    private:
-    void mark_timestamp_at(std::size_t idx) {
+    void mark_timestamp_at(std::size_t idx) { mark_timestamp_at(mtick_, idx); }
+
+    static void mark_timestamp_at(MTICK& tick, std::size_t idx) {
         const auto now = std::chrono::system_clock::now().time_since_epoch();
         const auto secs = std::chrono::duration_cast<std::chrono::seconds>(now);
         const auto nsecs = std::chrono::duration_cast<std::chrono::nanoseconds>(now - secs);
-        mtick_.tsec[idx] = static_cast<int>(secs.count());
-        mtick_.tnsec[idx] = static_cast<int>(nsecs.count());
+        tick.tsec[idx] = static_cast<int>(secs.count());
+        tick.tnsec[idx] = static_cast<int>(nsecs.count());
     }
 
     using LevelsMap = std::map<std::int64_t, std::int64_t>;
+
+    static void fill_tentative_side_from_levels(const LevelsMap& levels, bool bids_side, std::int64_t exec_qty,
+                                                std::array<PxType, kBookDepth>& px_out,
+                                                std::array<OBSizeType, kBookDepth>& qty_out) {
+        const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
+        px_out.fill(sentinel);
+        qty_out.fill(0);
+
+        std::int64_t remaining = exec_qty;
+        std::size_t write = 0;
+        if (bids_side) {
+            for (auto it = levels.rbegin(); it != levels.rend() && write < kBookDepth; ++it) {
+                std::int64_t level_qty = it->second;
+                if (remaining > 0) {
+                    const auto consume = remaining < level_qty ? remaining : level_qty;
+                    level_qty -= consume;
+                    remaining -= consume;
+                }
+                if (level_qty <= 0) {
+                    continue;
+                }
+                px_out[write] = static_cast<PxType>(it->first);
+                qty_out[write] = static_cast<OBSizeType>(level_qty);
+                ++write;
+            }
+            return;
+        }
+        for (auto it = levels.begin(); it != levels.end() && write < kBookDepth; ++it) {
+            std::int64_t level_qty = it->second;
+            if (remaining > 0) {
+                const auto consume = remaining < level_qty ? remaining : level_qty;
+                level_qty -= consume;
+                remaining -= consume;
+            }
+            if (level_qty <= 0) {
+                continue;
+            }
+            px_out[write] = static_cast<PxType>(it->first);
+            qty_out[write] = static_cast<OBSizeType>(level_qty);
+            ++write;
+        }
+    }
 
     static void apply_delta(LevelsMap& levels, std::int64_t price, std::int64_t delta) {
         if (delta == 0) {
@@ -446,7 +512,10 @@ class InstrumentBook {
     LevelsMap bids_;
     LevelsMap asks_;
     MTICK mtick_{};
+    MTICK tentative_mtick_{};
+    bool has_tentative_mtick_{false};
     std::uint32_t seq_no_{0};
+    std::uint32_t tentative_seq_no_{0};
 };
 
 class PriceLevelBooks {
@@ -530,7 +599,8 @@ class PriceLevelBooks {
     std::optional<MTICK> apply(const ExecutionSummary& msg) {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
-        return std::nullopt;
+        const auto& tentative = book.apply_execution_summary_tentative(msg);
+        return tentative;
     }
 
     MTICK snapshot(std::int64_t security_id) const {
@@ -541,7 +611,7 @@ class PriceLevelBooks {
             empty.refresh_mtick(true, true);
             return empty.mtick();
         }
-        return it->second.mtick();
+        return it->second.published_view();
     }
 
    private:

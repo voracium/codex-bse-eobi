@@ -13,6 +13,7 @@ using eobi::basic::ModifyOrderSamePriority;
 using eobi::basic::PartialOrderExecution;
 using eobi::basic::PriceLevelBooks;
 using eobi::basic::Side;
+using eobi::basic::ExecutionSummary;
 
 void test_add_and_publish_top_levels() {
     PriceLevelBooks books;
@@ -141,6 +142,30 @@ void test_mtick_timestamps_set_on_publish() {
     assert(out->tnsec[3] >= 0);
 }
 
+void test_execution_summary_tentative_passive_side() {
+    PriceLevelBooks books;
+    books.apply(AddOrder{.security_id = 1, .side = Side::Buy, .price = 100, .display_qty = 5});
+    books.apply(AddOrder{.security_id = 1, .side = Side::Buy, .price = 99, .display_qty = 5});
+    books.apply(AddOrder{.security_id = 1, .side = Side::Sell, .price = 101, .display_qty = 5});
+
+    auto tentative = books.apply(ExecutionSummary{
+        .security_id = 1,
+        .agg_side = Side::Sell,
+        .last_px = 100,
+        .last_qty = 7,
+    });
+    assert(tentative.has_value());
+    assert(tentative->bid[0] == 99);
+    assert(tentative->bid_size[0] == 3);
+    assert(tentative->ask[0] == 101);
+    assert(tentative->ask_size[0] == 5);
+
+    auto unchanged_real = books.apply(AddOrder{.security_id = 1, .side = Side::Sell, .price = 102, .display_qty = 1});
+    assert(unchanged_real.has_value());
+    assert(unchanged_real->bid[0] == 100);
+    assert(unchanged_real->bid_size[0] == 5);
+}
+
 }  // namespace
 
 int main() {
@@ -151,5 +176,6 @@ int main() {
     test_publish_only_when_top_n_changes();
     test_mass_delete();
     test_mtick_timestamps_set_on_publish();
+    test_execution_summary_tentative_passive_side();
     return 0;
 }
