@@ -311,23 +311,41 @@ class InstrumentBook {
         return {static_cast<PxType>(it->first), static_cast<OBSizeType>(it->second)};
     }
 
-    static void normalize_tail(std::array<PxType, kBookDepth>& px_out, std::array<OBSizeType, kBookDepth>& qty_out,
+    static bool normalize_tail(std::array<PxType, kBookDepth>& px_out, std::array<OBSizeType, kBookDepth>& qty_out,
                                bool bids_side) {
         const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
+        bool changed = false;
         for (std::size_t i = 0; i < kBookDepth; ++i) {
             if (qty_out[i] <= 0) {
-                px_out[i] = sentinel;
-                qty_out[i] = 0;
+                if (px_out[i] != sentinel) {
+                    px_out[i] = sentinel;
+                    changed = true;
+                }
+                if (qty_out[i] != 0) {
+                    qty_out[i] = 0;
+                    changed = true;
+                }
             }
         }
+        return changed;
     }
 
     static bool refresh_one_side_incremental(const LevelsMap& levels, bool bids_side, std::int64_t changed_price,
                                              std::array<PxType, kBookDepth>& px_out,
                                              std::array<OBSizeType, kBookDepth>& qty_out) {
-        const auto old_px = px_out;
-        const auto old_qty = qty_out;
-        normalize_tail(px_out, qty_out, bids_side);
+        bool changed = normalize_tail(px_out, qty_out, bids_side);
+        const auto set_level = [&](std::size_t i, PxType px, OBSizeType qty) {
+            bool local_changed = false;
+            if (px_out[i] != px) {
+                px_out[i] = px;
+                local_changed = true;
+            }
+            if (qty_out[i] != qty) {
+                qty_out[i] = qty;
+                local_changed = true;
+            }
+            return local_changed;
+        };
 
         const int old_idx = find_price_index(px_out, qty_out, changed_price, bids_side);
         const auto it = levels.find(changed_price);
@@ -336,11 +354,13 @@ class InstrumentBook {
         if (old_idx >= 0) {
             const std::size_t idx = static_cast<std::size_t>(old_idx);
             if (new_qty > 0) {
-                qty_out[idx] = new_qty;
+                if (qty_out[idx] != new_qty) {
+                    qty_out[idx] = new_qty;
+                    changed = true;
+                }
             } else {
                 for (std::size_t i = idx; i + 1 < kBookDepth; ++i) {
-                    px_out[i] = px_out[i + 1];
-                    qty_out[i] = qty_out[i + 1];
+                    changed = set_level(i, px_out[i + 1], qty_out[i + 1]) || changed;
                 }
                 std::pair<PxType, OBSizeType> tail{bids_side ? std::numeric_limits<PxType>::min()
                                                               : std::numeric_limits<PxType>::max(),
@@ -354,26 +374,23 @@ class InstrumentBook {
                     }
                 }
                 const auto [tail_px, tail_qty] = tail;
-                px_out[kBookDepth - 1] = tail_px;
-                qty_out[kBookDepth - 1] = tail_qty;
+                changed = set_level(kBookDepth - 1, tail_px, tail_qty) || changed;
             }
-            return px_out != old_px || qty_out != old_qty;
+            return changed;
         }
 
         if (new_qty <= 0) {
-            return false;
+            return changed;
         }
         const std::size_t insert_idx = find_insert_index(px_out, qty_out, changed_price, bids_side);
         if (insert_idx >= kBookDepth) {
-            return false;
+            return changed;
         }
         for (std::size_t i = kBookDepth - 1; i > insert_idx; --i) {
-            px_out[i] = px_out[i - 1];
-            qty_out[i] = qty_out[i - 1];
+            changed = set_level(i, px_out[i - 1], qty_out[i - 1]) || changed;
         }
-        px_out[insert_idx] = changed_price;
-        qty_out[insert_idx] = new_qty;
-        return px_out != old_px || qty_out != old_qty;
+        changed = set_level(insert_idx, changed_price, new_qty) || changed;
+        return changed;
     }
 
     static bool refresh_one_side_from_levels(const LevelsMap& levels, bool bids_side, std::array<PxType, kBookDepth>& px_out,
@@ -381,12 +398,18 @@ class InstrumentBook {
         std::array<PxType, kBookDepth> next_px{};
         std::array<OBSizeType, kBookDepth> next_qty{};
         fill_side_from_levels(levels, bids_side, next_px, next_qty);
-        if (next_px == px_out && next_qty == qty_out) {
-            return false;
+        bool changed = false;
+        for (std::size_t i = 0; i < kBookDepth; ++i) {
+            if (px_out[i] != next_px[i]) {
+                px_out[i] = next_px[i];
+                changed = true;
+            }
+            if (qty_out[i] != next_qty[i]) {
+                qty_out[i] = next_qty[i];
+                changed = true;
+            }
         }
-        px_out = next_px;
-        qty_out = next_qty;
-        return true;
+        return changed;
     }
 
     LevelsMap bids_;
