@@ -188,6 +188,8 @@ class InstrumentBook {
     void clear() {
         std::fill(bid_levels_.begin(), bid_levels_.end(), 0);
         std::fill(ask_levels_.begin(), ask_levels_.end(), 0);
+        std::fill(bid_nonzero_.begin(), bid_nonzero_.end(), 0);
+        std::fill(ask_nonzero_.begin(), ask_nonzero_.end(), 0);
         buy_max_idx_ = -1;
         sell_min_idx_ = -1;
     }
@@ -204,8 +206,12 @@ class InstrumentBook {
         const auto span = static_cast<std::uint64_t>((new_upper - new_lower) / kTickSize + 1);
         LevelsArray new_bid;
         LevelsArray new_ask;
+        NonZeroBits new_bid_nonzero;
+        NonZeroBits new_ask_nonzero;
         new_bid.assign(static_cast<std::size_t>(span), 0);
         new_ask.assign(static_cast<std::size_t>(span), 0);
+        new_bid_nonzero.assign(bit_words_for_levels(static_cast<std::size_t>(span)), 0);
+        new_ask_nonzero.assign(bit_words_for_levels(static_cast<std::size_t>(span)), 0);
 
         if (has_circuit_limits_) {
             for (std::size_t new_idx = 0; new_idx < new_bid.size(); ++new_idx) {
@@ -221,11 +227,19 @@ class InstrumentBook {
                 if (old_idx < bid_levels_.size()) {
                     new_bid[new_idx] = bid_levels_[old_idx];
                     new_ask[new_idx] = ask_levels_[old_idx];
+                    if (new_bid[new_idx] > 0) {
+                        bit_set(new_bid_nonzero, new_idx);
+                    }
+                    if (new_ask[new_idx] > 0) {
+                        bit_set(new_ask_nonzero, new_idx);
+                    }
                 }
             }
         }
         bid_levels_.swap(new_bid);
         ask_levels_.swap(new_ask);
+        bid_nonzero_.swap(new_bid_nonzero);
+        ask_nonzero_.swap(new_ask_nonzero);
         upper_circuit_limit_ = new_upper;
         lower_circuit_limit_ = new_lower;
         has_circuit_limits_ = true;
@@ -518,25 +532,28 @@ class InstrumentBook {
         if (EOBI_UNLIKELY(next_qty <= 0)) {
             levels[idx] = 0;
             if (bids_side) {
+                bit_clear(bid_nonzero_, idx);
+            } else {
+                bit_clear(ask_nonzero_, idx);
+            }
+            if (bids_side) {
                 if (buy_max_idx_ == static_cast<std::int64_t>(idx)) {
-                    while (buy_max_idx_ >= 0 && bid_levels_[static_cast<std::size_t>(buy_max_idx_)] <= 0) {
-                        --buy_max_idx_;
-                    }
+                    buy_max_idx_ = find_prev_set_bit(bid_nonzero_, buy_max_idx_ - 1, bid_levels_.size());
                 }
             } else {
                 if (sell_min_idx_ == static_cast<std::int64_t>(idx)) {
-                    const auto n = static_cast<std::int64_t>(ask_levels_.size());
-                    while (sell_min_idx_ < n && ask_levels_[static_cast<std::size_t>(sell_min_idx_)] <= 0) {
-                        ++sell_min_idx_;
-                    }
-                    if (sell_min_idx_ >= n) {
-                        sell_min_idx_ = -1;
-                    }
+                    sell_min_idx_ = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_ + 1),
+                                                      ask_levels_.size());
                 }
             }
             return;
         }
         levels[idx] = next_qty;
+        if (bids_side) {
+            bit_set(bid_nonzero_, idx);
+        } else {
+            bit_set(ask_nonzero_, idx);
+        }
         if (prev_qty <= 0) {
             if (bids_side) {
                 if (buy_max_idx_ < 0 || static_cast<std::int64_t>(idx) > buy_max_idx_) {
@@ -629,20 +646,9 @@ class InstrumentBook {
     }
 
     void recompute_top_indices() {
-        buy_max_idx_ = -1;
-        for (std::size_t i = bid_levels_.size(); i > 0; --i) {
-            if (bid_levels_[i - 1] > 0) {
-                buy_max_idx_ = static_cast<std::int64_t>(i - 1);
-                break;
-            }
-        }
-        sell_min_idx_ = -1;
-        for (std::size_t i = 0; i < ask_levels_.size(); ++i) {
-            if (ask_levels_[i] > 0) {
-                sell_min_idx_ = static_cast<std::int64_t>(i);
-                break;
-            }
-        }
+        buy_max_idx_ = find_prev_set_bit(bid_nonzero_, static_cast<std::int64_t>(bid_levels_.size()) - 1,
+                                         bid_levels_.size());
+        sell_min_idx_ = find_next_set_bit(ask_nonzero_, 0, ask_levels_.size());
     }
 
     LevelsArray bid_levels_;
