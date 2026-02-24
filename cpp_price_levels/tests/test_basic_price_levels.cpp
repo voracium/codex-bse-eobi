@@ -136,6 +136,23 @@ void test_execution_summary_continuous_only() {
     assert(cont->bid[0] == 99 && cont->bid_size[0] == 3);
 }
 
+void test_execution_summary_stpc_clamps_top_to_last_px_or_worse() {
+    PriceLevelBooks books;
+    books.apply(AddOrder{.seq_no = 1, .security_id = 9, .side = Side::Buy, .price = 100, .display_qty = 5});
+    books.apply(AddOrder{.seq_no = 2, .security_id = 9, .side = Side::Buy, .price = 99, .display_qty = 5});
+    books.apply(InstrumentStateChange{
+        .seq_no = 3,
+        .security_id = 9,
+        .sec_trd_status = SecTrdStatus::Continuous,
+    });
+
+    auto t = books.apply(
+        ExecutionSummary{.seq_no = 4, .security_id = 9, .agg_side = Side::Sell, .last_px = 99, .last_qty = 1});
+    assert(t.has_value());
+    assert(t->bid[0] == 99);
+    assert(t->bid_size[0] == 5);
+}
+
 void test_exec_price_uses_price_in_freeze_and_checks_circuit() {
     PriceLevelBooks books;
     books.apply(InstrumentInfo{
@@ -222,6 +239,7 @@ int main() {
     test_publish_only_on_top_depth_change();
     test_circuit_limit_filtering();
     test_execution_summary_continuous_only();
+    test_execution_summary_stpc_clamps_top_to_last_px_or_worse();
     test_exec_price_uses_price_in_freeze_and_checks_circuit();
     test_modify_with_invalid_prev_price_keeps_add_leg();
     test_timestamps_written_on_publish();

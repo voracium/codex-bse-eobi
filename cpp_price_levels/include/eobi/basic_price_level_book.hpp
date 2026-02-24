@@ -255,9 +255,11 @@ class InstrumentBook {
 
         const bool reduce_bids = msg.agg_side == Side::Sell;
         if (reduce_bids) {
-            fill_tentative_side_from_levels(bids_, true, msg.last_qty, tentative_mtick_.bid, tentative_mtick_.bid_size);
+            fill_tentative_side_from_levels(
+                bids_, true, msg.last_qty, msg.last_px, tentative_mtick_.bid, tentative_mtick_.bid_size);
         } else {
-            fill_tentative_side_from_levels(asks_, false, msg.last_qty, tentative_mtick_.ask, tentative_mtick_.ask_size);
+            fill_tentative_side_from_levels(
+                asks_, false, msg.last_qty, msg.last_px, tentative_mtick_.ask, tentative_mtick_.ask_size);
         }
 
         mark_timestamp_at(tentative_mtick_, 3);
@@ -279,14 +281,35 @@ class InstrumentBook {
 
     using LevelsMap = std::map<std::int64_t, std::int64_t>;
 
-    static void fill_tentative_side_from_levels(const LevelsMap& levels, bool bids_side, std::int64_t exec_qty,
+    static void enforce_top_at_last_px_or_worse(bool bids_side, std::int64_t last_px,
                                                 std::array<PxType, kBookDepth>& px_out,
+                                                std::array<OBSizeType, kBookDepth>& qty_out) {
+        const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
+        auto is_better_than_last = [&](PxType px) {
+            if (px == sentinel) {
+                return false;
+            }
+            return bids_side ? (px > last_px) : (px < last_px);
+        };
+        while (qty_out[0] > 0 && is_better_than_last(px_out[0])) {
+            for (std::size_t i = 0; i + 1 < kBookDepth; ++i) {
+                px_out[i] = px_out[i + 1];
+                qty_out[i] = qty_out[i + 1];
+            }
+            px_out[kBookDepth - 1] = sentinel;
+            qty_out[kBookDepth - 1] = 0;
+        }
+    }
+
+    static void fill_tentative_side_from_levels(const LevelsMap& levels, bool bids_side, std::int64_t exec_qty,
+                                                std::int64_t last_px, std::array<PxType, kBookDepth>& px_out,
                                                 std::array<OBSizeType, kBookDepth>& qty_out) {
         const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
         px_out.fill(sentinel);
         qty_out.fill(0);
 
         std::int64_t remaining = exec_qty;
+        std::int64_t consumed_at_px = 0;
         std::size_t write = 0;
         if (bids_side) {
             for (auto it = levels.rbegin(); it != levels.rend() && write < kBookDepth; ++it) {
@@ -295,6 +318,9 @@ class InstrumentBook {
                     const auto consume = remaining < level_qty ? remaining : level_qty;
                     level_qty -= consume;
                     remaining -= consume;
+                    if (consume > 0) {
+                        consumed_at_px = it->first;
+                    }
                 }
                 if (level_qty <= 0) {
                     continue;
@@ -302,6 +328,9 @@ class InstrumentBook {
                 px_out[write] = static_cast<PxType>(it->first);
                 qty_out[write] = static_cast<OBSizeType>(level_qty);
                 ++write;
+            }
+            if (consumed_at_px != 0 && consumed_at_px != last_px) {
+                enforce_top_at_last_px_or_worse(true, last_px, px_out, qty_out);
             }
             return;
         }
@@ -311,6 +340,9 @@ class InstrumentBook {
                 const auto consume = remaining < level_qty ? remaining : level_qty;
                 level_qty -= consume;
                 remaining -= consume;
+                if (consume > 0) {
+                    consumed_at_px = it->first;
+                }
             }
             if (level_qty <= 0) {
                 continue;
@@ -318,6 +350,9 @@ class InstrumentBook {
             px_out[write] = static_cast<PxType>(it->first);
             qty_out[write] = static_cast<OBSizeType>(level_qty);
             ++write;
+        }
+        if (consumed_at_px != 0 && consumed_at_px != last_px) {
+            enforce_top_at_last_px_or_worse(false, last_px, px_out, qty_out);
         }
     }
 
