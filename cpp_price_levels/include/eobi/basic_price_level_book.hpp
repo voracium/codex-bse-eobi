@@ -359,21 +359,23 @@ class InstrumentBook {
         std::int64_t consumed_at_px = 0;
         std::size_t write = 0;
         if (bids_side) {
-            for (std::size_t idx = levels.size(); idx > 0 && write < kBookDepth; --idx) {
-                std::int64_t level_qty = levels[idx - 1];
+            if (buy_max_idx_ < 0) {
+                return;
+            }
+            for (std::int64_t idx = buy_max_idx_; idx >= 0 && write < kBookDepth; --idx) {
+                std::int64_t level_qty = levels[static_cast<std::size_t>(idx)];
                 if (remaining > 0) {
                     const auto consume = remaining < level_qty ? remaining : level_qty;
                     level_qty -= consume;
                     remaining -= consume;
                     if (consume > 0) {
-                        consumed_at_px = norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx - 1) * kTickSize);
+                        consumed_at_px = norm_to_raw(lower_circuit_limit_ + idx * kTickSize);
                     }
                 }
                 if (level_qty <= 0) {
                     continue;
                 }
-                px_out[write] = static_cast<PxType>(
-                    norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx - 1) * kTickSize));
+                px_out[write] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
                 qty_out[write] = static_cast<OBSizeType>(level_qty);
                 ++write;
             }
@@ -382,7 +384,11 @@ class InstrumentBook {
             }
             return;
         }
-        for (std::size_t idx = 0; idx < levels.size() && write < kBookDepth; ++idx) {
+        if (sell_min_idx_ < 0) {
+            return;
+        }
+        for (std::size_t idx = static_cast<std::size_t>(sell_min_idx_); idx < levels.size() && write < kBookDepth;
+             ++idx) {
             std::int64_t level_qty = levels[idx];
             if (remaining > 0) {
                 const auto consume = remaining < level_qty ? remaining : level_qty;
