@@ -59,11 +59,11 @@ class InstrumentBook {
     }
 
     void update_instrument_info(const InstrumentInfo& info) {
-        if (EOBI_UNLIKELY(info.upper_ckt_lmt < info.lower_ckt_lmt || info.lower_ckt_lmt < 0)) {
+        if (EOBI_UNLIKELY(info.upper_limit() < info.lower_limit() || info.lower_limit() < 0)) {
             return;
         }
-        const auto new_lower = info.lower_ckt_lmt / kPriceMultiplier;
-        const auto new_upper = info.upper_ckt_lmt / kPriceMultiplier;
+        const auto new_lower = info.lower_limit() / kPriceMultiplier;
+        const auto new_upper = info.upper_limit() / kPriceMultiplier;
         if (EOBI_UNLIKELY(new_upper < new_lower)) {
             return;
         }
@@ -111,8 +111,8 @@ class InstrumentBook {
     }
 
     void update_instrument_state(const InstrumentStateChange& state) {
-        security_status_ = state.security_status;
-        sec_trd_status_ = state.sec_trd_status;
+        security_status_ = state.security_status_value();
+        sec_trd_status_ = state.sec_trd_status_value();
     }
 
     bool is_continuous_trading() const noexcept { return sec_trd_status_ == SecTrdStatus::Continuous; }
@@ -172,12 +172,12 @@ class InstrumentBook {
         tentative_mtick_ = mtick_;
         mark_timestamp_at(tentative_mtick_, 2);
 
-        const bool reduce_bids = msg.agg_side == Side::Sell;
+        const bool reduce_bids = msg.agg_side_value() == Side::Sell;
         if (reduce_bids) {
-            fill_tentative_side_from_levels(bid_levels_, true, msg.last_qty, msg.last_px, tentative_mtick_.bid,
+            fill_tentative_side_from_levels(bid_levels_, true, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.bid,
                                             tentative_mtick_.bid_size);
         } else {
-            fill_tentative_side_from_levels(ask_levels_, false, msg.last_qty, msg.last_px, tentative_mtick_.ask,
+            fill_tentative_side_from_levels(ask_levels_, false, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.ask,
                                             tentative_mtick_.ask_size);
         }
 

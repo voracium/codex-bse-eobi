@@ -12,12 +12,12 @@ namespace eobi::basic {
 class PriceLevelBooks {
    public:
     std::optional<MTICK> apply(const AddOrder& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.mark_processing_start();
-        const auto px = normalize_price(msg.price);
-        book.add(msg.side, px, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, px)) {
+        const auto px = normalize_price(msg.price_value());
+        book.add(msg.side_value(), px, msg.qty_value());
+        if (!book.refresh_mtick_incremental(msg.side_value(), px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -25,13 +25,13 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const ModifyOrder& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.mark_processing_start();
-        const auto prev_px = normalize_price(msg.prev_price);
-        const auto px = normalize_price(msg.price);
-        book.modify(msg.side, prev_px, msg.prev_display_qty, px, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, prev_px, px)) {
+        const auto prev_px = normalize_price(msg.prev_price_value());
+        const auto px = normalize_price(msg.price_value());
+        book.modify(msg.side_value(), prev_px, msg.prev_qty_value(), px, msg.qty_value());
+        if (!book.refresh_mtick_incremental(msg.side_value(), prev_px, px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -39,12 +39,12 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const ModifyOrderSamePriority& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.mark_processing_start();
-        const auto px = normalize_price(msg.price);
-        book.modify_same_priority(msg.side, px, msg.prev_display_qty, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, px)) {
+        const auto px = normalize_price(msg.price_value());
+        book.modify_same_priority(msg.side_value(), px, msg.prev_qty_value(), msg.qty_value());
+        if (!book.refresh_mtick_incremental(msg.side_value(), px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -52,12 +52,12 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const DeleteOrder& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.mark_processing_start();
-        const auto px = normalize_price(msg.price);
-        book.remove(msg.side, px, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, px)) {
+        const auto px = normalize_price(msg.price_value());
+        book.remove(msg.side_value(), px, msg.qty_value());
+        if (!book.refresh_mtick_incremental(msg.side_value(), px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -65,17 +65,17 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const MassDelete& msg) {
-        return apply_with_change(msg.security_id, true, true, msg.seq_no, [](InstrumentBook& book) { book.clear(); });
+        return apply_with_change(msg.security(), true, true, msg.seq(), [](InstrumentBook& book) { book.clear(); });
     }
 
     std::optional<MTICK> apply(const PartialOrderExecution& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.mark_processing_start();
-        const auto exec_px = (book.is_auction_freeze() && msg.price != 0) ? msg.price : msg.last_px;
+        const auto exec_px = (book.is_auction_freeze() && msg.price_value() != 0) ? msg.price_value() : msg.last_px_value();
         const auto px = normalize_price(exec_px);
-        book.partial_exec(msg.side, px, msg.last_qty);
-        if (!book.refresh_mtick_incremental(msg.side, px)) {
+        book.partial_exec(msg.side_value(), px, msg.last_qty_value());
+        if (!book.refresh_mtick_incremental(msg.side_value(), px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -83,13 +83,13 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const FullOrderExecution& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.mark_processing_start();
-        const auto exec_px = (book.is_auction_freeze() && msg.price != 0) ? msg.price : msg.last_px;
+        const auto exec_px = (book.is_auction_freeze() && msg.price_value() != 0) ? msg.price_value() : msg.last_px_value();
         const auto px = normalize_price(exec_px);
-        book.full_exec(msg.side, px, msg.last_qty);
-        if (!book.refresh_mtick_incremental(msg.side, px)) {
+        book.full_exec(msg.side_value(), px, msg.last_qty_value());
+        if (!book.refresh_mtick_incremental(msg.side_value(), px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -97,8 +97,8 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const ExecutionSummary& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         if (!book.is_continuous_trading()) {
             return std::nullopt;
         }
@@ -107,15 +107,15 @@ class PriceLevelBooks {
     }
 
     std::optional<MTICK> apply(const InstrumentInfo& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.update_instrument_info(msg);
         return std::nullopt;
     }
 
     std::optional<MTICK> apply(const InstrumentStateChange& msg) {
-        auto& book = ensure_book(msg.security_id);
-        book.mark_seq(msg.seq_no);
+        auto& book = ensure_book(msg.security());
+        book.mark_seq(msg.seq());
         book.update_instrument_state(msg);
         return std::nullopt;
     }

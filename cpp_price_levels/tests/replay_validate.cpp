@@ -79,6 +79,9 @@ SecurityStatus parse_security_status(const std::string& raw) {
     if (raw == "ACTIVE") {
         return SecurityStatus::Active;
     }
+    if (raw == "EXPIRED") {
+        return SecurityStatus::Expired;
+    }
     if (raw == "SUSPENDED") {
         return SecurityStatus::Suspended;
     }
@@ -89,23 +92,41 @@ SecurityStatus parse_security_status(const std::string& raw) {
 }
 
 SecTrdStatus parse_sec_trd_status(const std::string& raw) {
-    if (raw == "RESTRICTED") {
-        return SecTrdStatus::Restricted;
-    }
     if (raw == "CLOSED") {
         return SecTrdStatus::Closed;
     }
-    if (raw == "OPENING_AUCTION") {
-        return SecTrdStatus::OpeningAuction;
+    if (raw == "RESTRICTED") {
+        return SecTrdStatus::Restricted;
+    }
+    if (raw == "BOOK") {
+        return SecTrdStatus::Book;
     }
     if (raw == "CONTINUOUS") {
         return SecTrdStatus::Continuous;
     }
+    if (raw == "OPENING_AUCTION") {
+        return SecTrdStatus::OpeningAuction;
+    }
     if (raw == "OPENING_AUCTION_FREEZE") {
         return SecTrdStatus::OpeningAuctionFreeze;
     }
+    if (raw == "INTRADAY_AUCTION") {
+        return SecTrdStatus::IntradayAuction;
+    }
     if (raw == "INTRADAY_AUCTION_FREEZE") {
         return SecTrdStatus::IntradayAuctionFreeze;
+    }
+    if (raw == "CIRCUIT_BREAKER_AUCTION") {
+        return SecTrdStatus::CircuitBreakerAuction;
+    }
+    if (raw == "CIRCUIT_BREAKER_AUCTION_FREEZE") {
+        return SecTrdStatus::CircuitBreakerAuctionFreeze;
+    }
+    if (raw == "CLOSING_AUCTION") {
+        return SecTrdStatus::ClosingAuction;
+    }
+    if (raw == "CLOSING_AUCTION_FREEZE") {
+        return SecTrdStatus::ClosingAuctionFreeze;
     }
     return SecTrdStatus::Unknown;
 }
