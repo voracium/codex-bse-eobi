@@ -15,7 +15,8 @@ Machine details:
 
 ## Entries
 
-### 2026-02-23T18:05:04+05:30 | commit `c19361f`
+<details>
+<summary><code>2026-02-23T18:05:04+05:30</code> | commit <code>c19361f</code> | overall: avg <code>117</code>, p50 <code>98</code>, p90 <code>211</code>, p95 <code>247</code>, p99 <code>311</code></summary>
 
 | Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -32,36 +33,10 @@ Machine details:
 | mismatches | 36 |
 | missing | 4 |
 | extra_actual | 6433 |
+</details>
 
-### 2026-02-24T16:04:17+05:30 | commit `59fec83`
-
-Dataset:
-- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
-- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
-- mode: `strict`
-
-| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| overall | 952656 | 56 | 19 | 55 | 72 | 78 | 90 | 143362 |
-| N | 295058 | 53 | 26 | 52 | 63 | 68 | 77 | 143362 |
-| M | 339289 | 63 | 30 | 62 | 79 | 84 | 96 | 5316 |
-| X | 307444 | 53 | 23 | 52 | 65 | 70 | 79 | 4152 |
-| F | 2817 | 64 | 26 | 60 | 82 | 97 | 174 | 604 |
-| T | 3561 | 51 | 24 | 46 | 68 | 76 | 140 | 441 |
-| E | 4487 | 58 | 19 | 46 | 89 | 128 | 221 | 1868 |
-
-| Validation Metric | Value |
-|---|---:|
-| mismatches | 36 |
-| missing | 4 |
-| extra_actual | 6433 |
-
-### 2026-02-24T14:47:03+05:30 | commit `1d775cb`
-
-Dataset:
-- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
-- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
-- mode: `strict`
+<details>
+<summary><code>2026-02-24T14:47:03+05:30</code> | commit <code>1d775cb</code> | overall: avg <code>86</code>, p50 <code>78</code>, p90 <code>142</code>, p95 <code>163</code>, p99 <code>201</code></summary>
 
 | Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -78,36 +53,10 @@ Dataset:
 | mismatches | 36 |
 | missing | 4 |
 | extra_actual | 6433 |
+</details>
 
-### 2026-02-24T16:21:21+05:30 | commit `1c011b8`
-
-Dataset:
-- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
-- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
-- mode: `strict`
-
-| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| overall | 952656 | 56 | 20 | 55 | 71 | 77 | 88 | 13403 |
-| N | 295058 | 52 | 24 | 51 | 63 | 67 | 76 | 3000 |
-| M | 339289 | 62 | 31 | 61 | 78 | 83 | 94 | 13403 |
-| X | 307444 | 53 | 21 | 52 | 64 | 69 | 78 | 11063 |
-| F | 2817 | 63 | 23 | 59 | 79 | 96 | 156 | 660 |
-| T | 3561 | 50 | 25 | 45 | 64 | 73 | 131 | 272 |
-| E | 4487 | 55 | 20 | 45 | 82 | 117 | 189 | 503 |
-
-| Validation Metric | Value |
-|---|---:|
-| mismatches | 36 |
-| missing | 4 |
-| extra_actual | 6433 |
-
-### 2026-02-24T15:14:28+05:30 | commit `499ae47`
-
-Dataset:
-- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
-- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
-- mode: `strict`
+<details>
+<summary><code>2026-02-24T15:14:28+05:30</code> | commit <code>499ae47</code> | overall: avg <code>72</code>, p50 <code>72</code>, p90 <code>105</code>, p95 <code>115</code>, p99 <code>137</code></summary>
 
 | Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -124,13 +73,10 @@ Dataset:
 | mismatches | 36 |
 | missing | 4 |
 | extra_actual | 6433 |
+</details>
 
-### 2026-02-24T15:33:35+05:30 | commit `32ef89b`
-
-Dataset:
-- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
-- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
-- mode: `strict`
+<details>
+<summary><code>2026-02-24T15:33:35+05:30</code> | commit <code>32ef89b</code> | overall: avg <code>73</code>, p50 <code>73</code>, p90 <code>105</code>, p95 <code>115</code>, p99 <code>138</code></summary>
 
 | Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -147,3 +93,64 @@ Dataset:
 | mismatches | 36 |
 | missing | 4 |
 | extra_actual | 6433 |
+</details>
+
+<details>
+<summary><code>2026-02-24T16:04:17+05:30</code> | commit <code>59fec83</code> | overall: avg <code>56</code>, p50 <code>55</code>, p90 <code>72</code>, p95 <code>78</code>, p99 <code>90</code></summary>
+
+| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| overall | 952656 | 56 | 19 | 55 | 72 | 78 | 90 | 143362 |
+| N | 295058 | 53 | 26 | 52 | 63 | 68 | 77 | 143362 |
+| M | 339289 | 63 | 30 | 62 | 79 | 84 | 96 | 5316 |
+| X | 307444 | 53 | 23 | 52 | 65 | 70 | 79 | 4152 |
+| F | 2817 | 64 | 26 | 60 | 82 | 97 | 174 | 604 |
+| T | 3561 | 51 | 24 | 46 | 68 | 76 | 140 | 441 |
+| E | 4487 | 58 | 19 | 46 | 89 | 128 | 221 | 1868 |
+
+| Validation Metric | Value |
+|---|---:|
+| mismatches | 36 |
+| missing | 4 |
+| extra_actual | 6433 |
+</details>
+
+<details>
+<summary><code>2026-02-24T16:21:21+05:30</code> | commit <code>1c011b8</code> | overall: avg <code>56</code>, p50 <code>55</code>, p90 <code>71</code>, p95 <code>77</code>, p99 <code>88</code></summary>
+
+| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| overall | 952656 | 56 | 20 | 55 | 71 | 77 | 88 | 13403 |
+| N | 295058 | 52 | 24 | 51 | 63 | 67 | 76 | 3000 |
+| M | 339289 | 62 | 31 | 61 | 78 | 83 | 94 | 13403 |
+| X | 307444 | 53 | 21 | 52 | 64 | 69 | 78 | 11063 |
+| F | 2817 | 63 | 23 | 59 | 79 | 96 | 156 | 660 |
+| T | 3561 | 50 | 25 | 45 | 64 | 73 | 131 | 272 |
+| E | 4487 | 55 | 20 | 45 | 82 | 117 | 189 | 503 |
+
+| Validation Metric | Value |
+|---|---:|
+| mismatches | 36 |
+| missing | 4 |
+| extra_actual | 6433 |
+</details>
+
+<details open>
+<summary><code>2026-02-24T17:04:06+05:30</code> | commit <code>14c99ea</code> | overall: avg <code>56</code>, p50 <code>55</code>, p90 <code>72</code>, p95 <code>78</code>, p99 <code>89</code></summary>
+
+| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| overall | 952656 | 56 | 20 | 55 | 72 | 78 | 89 | 6496 |
+| N | 295058 | 53 | 24 | 52 | 63 | 67 | 75 | 6496 |
+| M | 339289 | 63 | 29 | 62 | 79 | 84 | 96 | 4650 |
+| X | 307444 | 54 | 23 | 53 | 65 | 70 | 78 | 5302 |
+| F | 2817 | 63 | 24 | 59 | 80 | 98 | 166 | 561 |
+| T | 3561 | 51 | 24 | 45 | 65 | 73 | 138 | 495 |
+| E | 4487 | 56 | 20 | 46 | 81 | 110 | 191 | 2211 |
+
+| Validation Metric | Value |
+|---|---:|
+| mismatches | 36 |
+| missing | 4 |
+| extra_actual | 6433 |
+</details>
