@@ -266,11 +266,12 @@ class InstrumentBook {
     }
 
     bool refresh_mtick_incremental(Side side, std::int64_t changed_price_a, std::int64_t changed_price_b) {
-        bool changed = refresh_mtick_incremental(side, changed_price_a);
-        if (changed_price_b != changed_price_a) {
-            changed = refresh_mtick_incremental(side, changed_price_b) || changed;
+        (void)changed_price_a;
+        (void)changed_price_b;
+        if (side == Side::Buy) {
+            return refresh_one_side_from_array(bid_levels_, true, mtick_.bid, mtick_.bid_size);
         }
-        return changed;
+        return refresh_one_side_from_array(ask_levels_, false, mtick_.ask, mtick_.ask_size);
     }
 
     const MTICK& mtick() const noexcept { return mtick_; }
