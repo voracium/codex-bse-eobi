@@ -330,6 +330,81 @@ class InstrumentBook {
     }
 
     using LevelsArray = std::vector<std::int64_t>;
+    using NonZeroBits = std::vector<std::uint64_t>;
+    static constexpr std::size_t kBitsPerWord = 64;
+
+    static std::size_t bit_words_for_levels(std::size_t levels_size) {
+        return (levels_size + (kBitsPerWord - 1)) / kBitsPerWord;
+    }
+
+    static void bit_set(NonZeroBits& bits, std::size_t idx) {
+        bits[idx / kBitsPerWord] |= (std::uint64_t{1} << (idx % kBitsPerWord));
+    }
+
+    static void bit_clear(NonZeroBits& bits, std::size_t idx) {
+        bits[idx / kBitsPerWord] &= ~(std::uint64_t{1} << (idx % kBitsPerWord));
+    }
+
+    static std::int64_t find_next_set_bit(const NonZeroBits& bits, std::size_t start, std::size_t levels_size) {
+        if (start >= levels_size || bits.empty()) {
+            return -1;
+        }
+        std::size_t word = start / kBitsPerWord;
+        std::uint64_t w = bits[word] & (~std::uint64_t{0} << (start % kBitsPerWord));
+        while (true) {
+            if (w != 0) {
+#if defined(__GNUC__) || defined(__clang__)
+                const auto bit = static_cast<std::size_t>(__builtin_ctzll(w));
+#else
+                std::size_t bit = 0;
+                while (((w >> bit) & 1ULL) == 0ULL) {
+                    ++bit;
+                }
+#endif
+                const auto idx = word * kBitsPerWord + bit;
+                return idx < levels_size ? static_cast<std::int64_t>(idx) : -1;
+            }
+            ++word;
+            if (word >= bits.size()) {
+                return -1;
+            }
+            w = bits[word];
+        }
+    }
+
+    static std::int64_t find_prev_set_bit(const NonZeroBits& bits, std::int64_t start, std::size_t levels_size) {
+        if (start < 0 || levels_size == 0 || bits.empty()) {
+            return -1;
+        }
+        std::size_t s = static_cast<std::size_t>(start);
+        if (s >= levels_size) {
+            s = levels_size - 1;
+        }
+        std::size_t word = s / kBitsPerWord;
+        const auto bit = s % kBitsPerWord;
+        const std::uint64_t mask =
+            (bit == (kBitsPerWord - 1)) ? ~std::uint64_t{0} : ((std::uint64_t{1} << (bit + 1)) - 1);
+        std::uint64_t w = bits[word] & mask;
+        while (true) {
+            if (w != 0) {
+#if defined(__GNUC__) || defined(__clang__)
+                const auto msb = static_cast<std::size_t>(63 - __builtin_clzll(w));
+#else
+                std::size_t msb = kBitsPerWord - 1;
+                while (((w >> msb) & 1ULL) == 0ULL) {
+                    --msb;
+                }
+#endif
+                const auto idx = word * kBitsPerWord + msb;
+                return idx < levels_size ? static_cast<std::int64_t>(idx) : -1;
+            }
+            if (word == 0) {
+                return -1;
+            }
+            --word;
+            w = bits[word];
+        }
+    }
 
     static void enforce_top_at_last_px_or_worse(bool bids_side, std::int64_t last_px,
                                                 std::array<PxType, kBookDepth>& px_out,
@@ -572,6 +647,8 @@ class InstrumentBook {
 
     LevelsArray bid_levels_;
     LevelsArray ask_levels_;
+    NonZeroBits bid_nonzero_;
+    NonZeroBits ask_nonzero_;
     MTICK mtick_{};
     MTICK tentative_mtick_{};
     bool has_tentative_mtick_{false};
