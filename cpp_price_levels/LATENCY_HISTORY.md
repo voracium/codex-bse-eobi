@@ -32,3 +32,26 @@ Machine details:
 | mismatches | 36 |
 | missing | 4 |
 | extra_actual | 6433 |
+
+### 2026-02-24T14:47:03+05:30 | commit `1d775cb`
+
+Dataset:
+- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
+- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
+- mode: `strict`
+
+| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| overall | 952656 | 86 | 19 | 78 | 142 | 163 | 201 | 12591 |
+| N | 295058 | 70 | 19 | 69 | 96 | 105 | 123 | 11170 |
+| M | 339289 | 112 | 20 | 114 | 171 | 187 | 223 | 12591 |
+| X | 307444 | 72 | 20 | 72 | 101 | 109 | 128 | 11941 |
+| F | 2817 | 107 | 21 | 94 | 172 | 223 | 361 | 851 |
+| T | 3561 | 78 | 22 | 69 | 120 | 151 | 255 | 783 |
+| E | 4487 | 79 | 20 | 69 | 134 | 166 | 274 | 3578 |
+
+| Validation Metric | Value |
+|---|---:|
+| mismatches | 36 |
+| missing | 4 |
+| extra_actual | 6433 |
