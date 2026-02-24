@@ -459,7 +459,8 @@ class InstrumentBook {
             if (EOBI_UNLIKELY(buy_max_idx_ < 0)) {
                 return;
             }
-            for (std::int64_t idx = buy_max_idx_; idx >= 0 && write < kBookDepth; --idx) {
+            std::int64_t idx = find_prev_set_bit(bid_nonzero_, buy_max_idx_, levels.size());
+            while (idx >= 0 && write < kBookDepth) {
                 std::int64_t level_qty = levels[static_cast<std::size_t>(idx)];
                 if (remaining > 0) {
                     const auto consume = remaining < level_qty ? remaining : level_qty;
@@ -470,11 +471,13 @@ class InstrumentBook {
                     }
                 }
                 if (level_qty <= 0) {
+                    idx = find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
                     continue;
                 }
                 px_out[write] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
                 qty_out[write] = static_cast<OBSizeType>(level_qty);
                 ++write;
+                idx = find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
             }
             if (consumed_at_px != 0 && consumed_at_px != last_px) {
                 enforce_top_at_last_px_or_worse(true, last_px, px_out, qty_out);
@@ -484,8 +487,8 @@ class InstrumentBook {
         if (EOBI_UNLIKELY(sell_min_idx_ < 0)) {
             return;
         }
-        for (std::size_t idx = static_cast<std::size_t>(sell_min_idx_); idx < levels.size() && write < kBookDepth;
-             ++idx) {
+        std::int64_t idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_), levels.size());
+        while (idx >= 0 && write < kBookDepth) {
             std::int64_t level_qty = levels[idx];
             if (remaining > 0) {
                 const auto consume = remaining < level_qty ? remaining : level_qty;
@@ -496,12 +499,14 @@ class InstrumentBook {
                 }
             }
             if (level_qty <= 0) {
+                idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
                 continue;
             }
             px_out[write] =
                 static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
             qty_out[write] = static_cast<OBSizeType>(level_qty);
             ++write;
+            idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
         }
         if (consumed_at_px != 0 && consumed_at_px != last_px) {
             enforce_top_at_last_px_or_worse(false, last_px, px_out, qty_out);
@@ -605,29 +610,27 @@ class InstrumentBook {
         std::size_t w = 0;
         if (bids_side) {
             if (buy_max_idx_ >= 0) {
-                for (std::int64_t idx = buy_max_idx_; idx >= 0 && w < kBookDepth; --idx) {
+                std::int64_t idx = find_prev_set_bit(bid_nonzero_, buy_max_idx_, levels.size());
+                while (idx >= 0 && w < kBookDepth) {
                     const auto q = levels[static_cast<std::size_t>(idx)];
-                    if (q <= 0) {
-                        continue;
-                    }
                     next_px[w] = static_cast<PxType>(
                         norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
                     next_qty[w] = static_cast<OBSizeType>(q);
                     ++w;
+                    idx = find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
                 }
             }
         } else {
             if (sell_min_idx_ >= 0) {
-                for (std::size_t idx = static_cast<std::size_t>(sell_min_idx_); idx < levels.size() && w < kBookDepth;
-                     ++idx) {
+                std::int64_t idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_),
+                                                     levels.size());
+                while (idx >= 0 && w < kBookDepth) {
                     const auto q = levels[idx];
-                    if (q <= 0) {
-                        continue;
-                    }
                     next_px[w] =
                         static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
                     next_qty[w] = static_cast<OBSizeType>(q);
                     ++w;
+                    idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
                 }
             }
         }
