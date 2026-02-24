@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "eobi/level_bitmap.hpp"
+
 namespace eobi::basic {
 
 #ifndef EOBI_BOOK_DEPTH
@@ -210,8 +212,8 @@ class InstrumentBook {
         NonZeroBits new_ask_nonzero;
         new_bid.assign(static_cast<std::size_t>(span), 0);
         new_ask.assign(static_cast<std::size_t>(span), 0);
-        new_bid_nonzero.assign(bit_words_for_levels(static_cast<std::size_t>(span)), 0);
-        new_ask_nonzero.assign(bit_words_for_levels(static_cast<std::size_t>(span)), 0);
+        new_bid_nonzero.assign(LevelBitmap::word_count_for_levels(static_cast<std::size_t>(span)), 0);
+        new_ask_nonzero.assign(LevelBitmap::word_count_for_levels(static_cast<std::size_t>(span)), 0);
 
         if (has_circuit_limits_) {
             for (std::size_t new_idx = 0; new_idx < new_bid.size(); ++new_idx) {
@@ -228,10 +230,10 @@ class InstrumentBook {
                     new_bid[new_idx] = bid_levels_[old_idx];
                     new_ask[new_idx] = ask_levels_[old_idx];
                     if (new_bid[new_idx] > 0) {
-                        bit_set(new_bid_nonzero, new_idx);
+                        LevelBitmap::set_bit(new_bid_nonzero, new_idx);
                     }
                     if (new_ask[new_idx] > 0) {
-                        bit_set(new_ask_nonzero, new_idx);
+                        LevelBitmap::set_bit(new_ask_nonzero, new_idx);
                     }
                 }
             }
@@ -344,83 +346,8 @@ class InstrumentBook {
     }
 
     using LevelsArray = std::vector<std::int64_t>;
-    using NonZeroBits = std::vector<std::uint64_t>;
-    static constexpr std::size_t kBitsPerWord = 64;
-    static constexpr std::size_t kBitsShift = 6;
-    static constexpr std::size_t kBitsMask = kBitsPerWord - 1;
-
-    static std::size_t bit_words_for_levels(std::size_t levels_size) {
-        return (levels_size + kBitsMask) >> kBitsShift;
-    }
-
-    static void bit_set(NonZeroBits& bits, std::size_t idx) {
-        bits[idx >> kBitsShift] |= (std::uint64_t{1} << (idx & kBitsMask));
-    }
-
-    static void bit_clear(NonZeroBits& bits, std::size_t idx) {
-        bits[idx >> kBitsShift] &= ~(std::uint64_t{1} << (idx & kBitsMask));
-    }
-
-    static std::int64_t find_next_set_bit(const NonZeroBits& bits, std::size_t start, std::size_t levels_size) {
-        if (EOBI_UNLIKELY(start >= levels_size || bits.empty())) {
-            return -1;
-        }
-        std::size_t word = start >> kBitsShift;
-        std::uint64_t w = bits[word] & (~std::uint64_t{0} << (start & kBitsMask));
-        while (true) {
-            if (w != 0) {
-#if defined(__GNUC__) || defined(__clang__)
-                const auto bit = static_cast<std::size_t>(__builtin_ctzll(w));
-#else
-                std::size_t bit = 0;
-                while (((w >> bit) & 1ULL) == 0ULL) {
-                    ++bit;
-                }
-#endif
-                const auto idx = (word << kBitsShift) + bit;
-                return idx < levels_size ? static_cast<std::int64_t>(idx) : -1;
-            }
-            ++word;
-            if (EOBI_UNLIKELY(word >= bits.size())) {
-                return -1;
-            }
-            w = bits[word];
-        }
-    }
-
-    static std::int64_t find_prev_set_bit(const NonZeroBits& bits, std::int64_t start, std::size_t levels_size) {
-        if (EOBI_UNLIKELY(start < 0 || levels_size == 0 || bits.empty())) {
-            return -1;
-        }
-        std::size_t s = static_cast<std::size_t>(start);
-        if (EOBI_UNLIKELY(s >= levels_size)) {
-            s = levels_size - 1;
-        }
-        std::size_t word = s >> kBitsShift;
-        const auto bit = s & kBitsMask;
-        const std::uint64_t mask =
-            (bit == (kBitsPerWord - 1)) ? ~std::uint64_t{0} : ((std::uint64_t{1} << (bit + 1)) - 1);
-        std::uint64_t w = bits[word] & mask;
-        while (true) {
-            if (w != 0) {
-#if defined(__GNUC__) || defined(__clang__)
-                const auto msb = static_cast<std::size_t>(63 - __builtin_clzll(w));
-#else
-                std::size_t msb = kBitsPerWord - 1;
-                while (((w >> msb) & 1ULL) == 0ULL) {
-                    --msb;
-                }
-#endif
-                const auto idx = (word << kBitsShift) + msb;
-                return idx < levels_size ? static_cast<std::int64_t>(idx) : -1;
-            }
-            if (word == 0) {
-                return -1;
-            }
-            --word;
-            w = bits[word];
-        }
-    }
+    using NonZeroBits = detail::NonZeroBits;
+    using LevelBitmap = detail::LevelBitmap;
 
     static void enforce_top_at_last_px_or_worse(bool bids_side, std::int64_t last_px,
                                                 std::array<PxType, kBookDepth>& px_out,
@@ -461,7 +388,7 @@ class InstrumentBook {
             if (EOBI_UNLIKELY(buy_max_idx_ < 0)) {
                 return;
             }
-            std::int64_t idx = find_prev_set_bit(bid_nonzero_, buy_max_idx_, levels.size());
+            std::int64_t idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, buy_max_idx_, levels.size());
             while (idx >= 0 && write < kBookDepth) {
                 std::int64_t level_qty = levels[static_cast<std::size_t>(idx)];
                 if (remaining > 0) {
@@ -473,13 +400,13 @@ class InstrumentBook {
                     }
                 }
                 if (level_qty <= 0) {
-                    idx = find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
+                    idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
                     continue;
                 }
                 px_out[write] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
                 qty_out[write] = static_cast<OBSizeType>(level_qty);
                 ++write;
-                idx = find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
+                idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
             }
             if (consumed_at_px != 0 && consumed_at_px != last_px) {
                 enforce_top_at_last_px_or_worse(true, last_px, px_out, qty_out);
@@ -489,7 +416,7 @@ class InstrumentBook {
         if (EOBI_UNLIKELY(sell_min_idx_ < 0)) {
             return;
         }
-        std::int64_t idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_), levels.size());
+        std::int64_t idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_), levels.size());
         while (idx >= 0 && write < kBookDepth) {
             std::int64_t level_qty = levels[idx];
             if (remaining > 0) {
@@ -501,14 +428,14 @@ class InstrumentBook {
                 }
             }
             if (level_qty <= 0) {
-                idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
+                idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
                 continue;
             }
             px_out[write] =
                 static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
             qty_out[write] = static_cast<OBSizeType>(level_qty);
             ++write;
-            idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
+            idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
         }
         if (consumed_at_px != 0 && consumed_at_px != last_px) {
             enforce_top_at_last_px_or_worse(false, last_px, px_out, qty_out);
@@ -539,17 +466,17 @@ class InstrumentBook {
         if (EOBI_UNLIKELY(next_qty <= 0)) {
             levels[idx] = 0;
             if (bids_side) {
-                bit_clear(bid_nonzero_, idx);
+                LevelBitmap::clear_bit(bid_nonzero_, idx);
             } else {
-                bit_clear(ask_nonzero_, idx);
+                LevelBitmap::clear_bit(ask_nonzero_, idx);
             }
             if (bids_side) {
                 if (buy_max_idx_ == static_cast<std::int64_t>(idx)) {
-                    buy_max_idx_ = find_prev_set_bit(bid_nonzero_, buy_max_idx_ - 1, bid_levels_.size());
+                    buy_max_idx_ = LevelBitmap::find_prev_set_bit(bid_nonzero_, buy_max_idx_ - 1, bid_levels_.size());
                 }
             } else {
                 if (sell_min_idx_ == static_cast<std::int64_t>(idx)) {
-                    sell_min_idx_ = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_ + 1),
+                    sell_min_idx_ = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_ + 1),
                                                       ask_levels_.size());
                 }
             }
@@ -557,9 +484,9 @@ class InstrumentBook {
         }
         levels[idx] = next_qty;
         if (bids_side) {
-            bit_set(bid_nonzero_, idx);
+            LevelBitmap::set_bit(bid_nonzero_, idx);
         } else {
-            bit_set(ask_nonzero_, idx);
+            LevelBitmap::set_bit(ask_nonzero_, idx);
         }
         if (prev_qty <= 0) {
             if (bids_side) {
@@ -612,19 +539,19 @@ class InstrumentBook {
         std::size_t w = 0;
         if (bids_side) {
             if (buy_max_idx_ >= 0) {
-                std::int64_t idx = find_prev_set_bit(bid_nonzero_, buy_max_idx_, levels.size());
+                std::int64_t idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, buy_max_idx_, levels.size());
                 while (idx >= 0 && w < kBookDepth) {
                     const auto q = levels[static_cast<std::size_t>(idx)];
                     next_px[w] = static_cast<PxType>(
                         norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
                     next_qty[w] = static_cast<OBSizeType>(q);
                     ++w;
-                    idx = find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
+                    idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
                 }
             }
         } else {
             if (sell_min_idx_ >= 0) {
-                std::int64_t idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_),
+                std::int64_t idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_),
                                                      levels.size());
                 while (idx >= 0 && w < kBookDepth) {
                     const auto q = levels[idx];
@@ -632,7 +559,7 @@ class InstrumentBook {
                         static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
                     next_qty[w] = static_cast<OBSizeType>(q);
                     ++w;
-                    idx = find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
+                    idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
                 }
             }
         }
@@ -651,9 +578,9 @@ class InstrumentBook {
     }
 
     void recompute_top_indices() {
-        buy_max_idx_ = find_prev_set_bit(bid_nonzero_, static_cast<std::int64_t>(bid_levels_.size()) - 1,
+        buy_max_idx_ = LevelBitmap::find_prev_set_bit(bid_nonzero_, static_cast<std::int64_t>(bid_levels_.size()) - 1,
                                          bid_levels_.size());
-        sell_min_idx_ = find_next_set_bit(ask_nonzero_, 0, ask_levels_.size());
+        sell_min_idx_ = LevelBitmap::find_next_set_bit(ask_nonzero_, 0, ask_levels_.size());
     }
 
     LevelsArray bid_levels_;
