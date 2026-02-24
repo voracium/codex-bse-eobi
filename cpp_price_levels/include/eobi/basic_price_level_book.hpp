@@ -14,6 +14,13 @@ namespace eobi::basic {
 #ifndef EOBI_BOOK_DEPTH
 #define EOBI_BOOK_DEPTH 5
 #endif
+#if defined(__GNUC__) || defined(__clang__)
+#define EOBI_LIKELY(x) (__builtin_expect(!!(x), 1))
+#define EOBI_UNLIKELY(x) (__builtin_expect(!!(x), 0))
+#else
+#define EOBI_LIKELY(x) (x)
+#define EOBI_UNLIKELY(x) (x)
+#endif
 
 using SymbolIdType = std::int64_t;
 using PxType = std::int64_t;
@@ -186,12 +193,12 @@ class InstrumentBook {
     }
 
     void update_instrument_info(const InstrumentInfo& info) {
-        if (info.upper_ckt_lmt < info.lower_ckt_lmt || info.lower_ckt_lmt < 0) {
+        if (EOBI_UNLIKELY(info.upper_ckt_lmt < info.lower_ckt_lmt || info.lower_ckt_lmt < 0)) {
             return;
         }
         const auto new_lower = info.lower_ckt_lmt / kPriceMultiplier;
         const auto new_upper = info.upper_ckt_lmt / kPriceMultiplier;
-        if (new_upper < new_lower) {
+        if (EOBI_UNLIKELY(new_upper < new_lower)) {
             return;
         }
         const auto span = static_cast<std::uint64_t>((new_upper - new_lower) / kTickSize + 1);
@@ -352,7 +359,7 @@ class InstrumentBook {
         const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
         px_out.fill(sentinel);
         qty_out.fill(0);
-        if (!has_circuit_limits_ || levels.empty()) {
+        if (EOBI_UNLIKELY(!has_circuit_limits_ || levels.empty())) {
             return;
         }
 
@@ -360,7 +367,7 @@ class InstrumentBook {
         std::int64_t consumed_at_px = 0;
         std::size_t write = 0;
         if (bids_side) {
-            if (buy_max_idx_ < 0) {
+            if (EOBI_UNLIKELY(buy_max_idx_ < 0)) {
                 return;
             }
             for (std::int64_t idx = buy_max_idx_; idx >= 0 && write < kBookDepth; --idx) {
@@ -385,7 +392,7 @@ class InstrumentBook {
             }
             return;
         }
-        if (sell_min_idx_ < 0) {
+        if (EOBI_UNLIKELY(sell_min_idx_ < 0)) {
             return;
         }
         for (std::size_t idx = static_cast<std::size_t>(sell_min_idx_); idx < levels.size() && write < kBookDepth;
@@ -413,14 +420,14 @@ class InstrumentBook {
     }
 
     bool try_price_to_index(std::int64_t price, std::size_t& out_idx) const {
-        if (!has_circuit_limits_ || price <= 0) {
+        if (EOBI_UNLIKELY(!has_circuit_limits_ || price <= 0)) {
             return false;
         }
-        if (price < lower_circuit_limit_ || price > upper_circuit_limit_) {
+        if (EOBI_UNLIKELY(price < lower_circuit_limit_ || price > upper_circuit_limit_)) {
             return false;
         }
         const auto delta = price - lower_circuit_limit_;
-        if (delta % kTickSize != 0) {
+        if (EOBI_UNLIKELY(delta % kTickSize != 0)) {
             return false;
         }
         out_idx = static_cast<std::size_t>(delta / kTickSize);
@@ -428,12 +435,12 @@ class InstrumentBook {
     }
 
     void apply_delta(LevelsArray& levels, std::size_t idx, std::int64_t delta, bool bids_side) {
-        if (delta == 0) {
+        if (EOBI_UNLIKELY(delta == 0)) {
             return;
         }
         const auto prev_qty = levels[idx];
         const auto next_qty = levels[idx] + delta;
-        if (next_qty <= 0) {
+        if (EOBI_UNLIKELY(next_qty <= 0)) {
             levels[idx] = 0;
             if (bids_side) {
                 if (buy_max_idx_ == static_cast<std::int64_t>(idx)) {
@@ -469,11 +476,8 @@ class InstrumentBook {
     }
 
     void apply_delta(Side side, std::int64_t price, std::int64_t delta) {
-        if (!is_price_within_circuit(price)) {
-            return;
-        }
         std::size_t idx = 0;
-        if (!try_price_to_index(price, idx)) {
+        if (EOBI_UNLIKELY(!try_price_to_index(price, idx))) {
             return;
         }
         if (side == Side::Buy) {
@@ -491,7 +495,7 @@ class InstrumentBook {
         next_px.fill(sentinel);
         next_qty.fill(0);
 
-        if (!has_circuit_limits_ || levels.empty()) {
+        if (EOBI_UNLIKELY(!has_circuit_limits_ || levels.empty())) {
             bool changed = false;
             for (std::size_t i = 0; i < kBookDepth; ++i) {
                 if (px_out[i] != next_px[i]) {
@@ -729,5 +733,8 @@ class PriceLevelBooks {
 
     std::unordered_map<std::int64_t, InstrumentBook> books_;
 };
+
+#undef EOBI_LIKELY
+#undef EOBI_UNLIKELY
 
 }  // namespace eobi::basic
