@@ -346,25 +346,27 @@ class InstrumentBook {
     using LevelsArray = std::vector<std::int64_t>;
     using NonZeroBits = std::vector<std::uint64_t>;
     static constexpr std::size_t kBitsPerWord = 64;
+    static constexpr std::size_t kBitsShift = 6;
+    static constexpr std::size_t kBitsMask = kBitsPerWord - 1;
 
     static std::size_t bit_words_for_levels(std::size_t levels_size) {
-        return (levels_size + (kBitsPerWord - 1)) / kBitsPerWord;
+        return (levels_size + kBitsMask) >> kBitsShift;
     }
 
     static void bit_set(NonZeroBits& bits, std::size_t idx) {
-        bits[idx / kBitsPerWord] |= (std::uint64_t{1} << (idx % kBitsPerWord));
+        bits[idx >> kBitsShift] |= (std::uint64_t{1} << (idx & kBitsMask));
     }
 
     static void bit_clear(NonZeroBits& bits, std::size_t idx) {
-        bits[idx / kBitsPerWord] &= ~(std::uint64_t{1} << (idx % kBitsPerWord));
+        bits[idx >> kBitsShift] &= ~(std::uint64_t{1} << (idx & kBitsMask));
     }
 
     static std::int64_t find_next_set_bit(const NonZeroBits& bits, std::size_t start, std::size_t levels_size) {
-        if (start >= levels_size || bits.empty()) {
+        if (EOBI_UNLIKELY(start >= levels_size || bits.empty())) {
             return -1;
         }
-        std::size_t word = start / kBitsPerWord;
-        std::uint64_t w = bits[word] & (~std::uint64_t{0} << (start % kBitsPerWord));
+        std::size_t word = start >> kBitsShift;
+        std::uint64_t w = bits[word] & (~std::uint64_t{0} << (start & kBitsMask));
         while (true) {
             if (w != 0) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -375,11 +377,11 @@ class InstrumentBook {
                     ++bit;
                 }
 #endif
-                const auto idx = word * kBitsPerWord + bit;
+                const auto idx = (word << kBitsShift) + bit;
                 return idx < levels_size ? static_cast<std::int64_t>(idx) : -1;
             }
             ++word;
-            if (word >= bits.size()) {
+            if (EOBI_UNLIKELY(word >= bits.size())) {
                 return -1;
             }
             w = bits[word];
@@ -387,15 +389,15 @@ class InstrumentBook {
     }
 
     static std::int64_t find_prev_set_bit(const NonZeroBits& bits, std::int64_t start, std::size_t levels_size) {
-        if (start < 0 || levels_size == 0 || bits.empty()) {
+        if (EOBI_UNLIKELY(start < 0 || levels_size == 0 || bits.empty())) {
             return -1;
         }
         std::size_t s = static_cast<std::size_t>(start);
-        if (s >= levels_size) {
+        if (EOBI_UNLIKELY(s >= levels_size)) {
             s = levels_size - 1;
         }
-        std::size_t word = s / kBitsPerWord;
-        const auto bit = s % kBitsPerWord;
+        std::size_t word = s >> kBitsShift;
+        const auto bit = s & kBitsMask;
         const std::uint64_t mask =
             (bit == (kBitsPerWord - 1)) ? ~std::uint64_t{0} : ((std::uint64_t{1} << (bit + 1)) - 1);
         std::uint64_t w = bits[word] & mask;
@@ -409,7 +411,7 @@ class InstrumentBook {
                     --msb;
                 }
 #endif
-                const auto idx = word * kBitsPerWord + msb;
+                const auto idx = (word << kBitsShift) + msb;
                 return idx < levels_size ? static_cast<std::int64_t>(idx) : -1;
             }
             if (word == 0) {
