@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
-#include <map>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -20,6 +19,8 @@ using SymbolIdType = std::int64_t;
 using PxType = std::int64_t;
 using OBSizeType = std::int64_t;
 inline constexpr std::size_t kBookDepth = EOBI_BOOK_DEPTH;
+inline constexpr std::int64_t kPriceMultiplier = 1'000'000;
+inline constexpr std::int64_t kTickSize = 5;
 
 enum class Side : std::uint8_t {
     Buy = 1,
@@ -178,14 +179,50 @@ class InstrumentBook {
     void full_exec(Side side, std::int64_t last_px, std::int64_t last_qty) { apply_delta(side, last_px, -last_qty); }
 
     void clear() {
-        bids_.clear();
-        asks_.clear();
+        std::fill(bid_levels_.begin(), bid_levels_.end(), 0);
+        std::fill(ask_levels_.begin(), ask_levels_.end(), 0);
+        buy_max_idx_ = -1;
+        sell_min_idx_ = -1;
     }
 
     void update_instrument_info(const InstrumentInfo& info) {
-        upper_circuit_limit_ = info.upper_ckt_lmt;
-        lower_circuit_limit_ = info.lower_ckt_lmt;
+        if (info.upper_ckt_lmt < info.lower_ckt_lmt || info.lower_ckt_lmt < 0) {
+            return;
+        }
+        const auto new_lower = info.lower_ckt_lmt / kPriceMultiplier;
+        const auto new_upper = info.upper_ckt_lmt / kPriceMultiplier;
+        if (new_upper < new_lower) {
+            return;
+        }
+        const auto span = static_cast<std::uint64_t>((new_upper - new_lower) / kTickSize + 1);
+        LevelsArray new_bid;
+        LevelsArray new_ask;
+        new_bid.assign(static_cast<std::size_t>(span), 0);
+        new_ask.assign(static_cast<std::size_t>(span), 0);
+
+        if (has_circuit_limits_) {
+            for (std::size_t new_idx = 0; new_idx < new_bid.size(); ++new_idx) {
+                const auto px_norm = new_lower + static_cast<std::int64_t>(new_idx) * kTickSize;
+                if (px_norm < lower_circuit_limit_ || px_norm > upper_circuit_limit_) {
+                    continue;
+                }
+                const auto delta = px_norm - lower_circuit_limit_;
+                if (delta % kTickSize != 0) {
+                    continue;
+                }
+                const auto old_idx = static_cast<std::size_t>(delta / kTickSize);
+                if (old_idx < bid_levels_.size()) {
+                    new_bid[new_idx] = bid_levels_[old_idx];
+                    new_ask[new_idx] = ask_levels_[old_idx];
+                }
+            }
+        }
+        bid_levels_.swap(new_bid);
+        ask_levels_.swap(new_ask);
+        upper_circuit_limit_ = new_upper;
+        lower_circuit_limit_ = new_lower;
         has_circuit_limits_ = true;
+        recompute_top_indices();
     }
 
     void update_instrument_state(const InstrumentStateChange& state) {
@@ -199,28 +236,33 @@ class InstrumentBook {
                sec_trd_status_ == SecTrdStatus::IntradayAuctionFreeze;
     }
     bool is_price_within_circuit(std::int64_t price) const noexcept {
-        if (!has_circuit_limits_) {
+        if (!has_circuit_limits_ || price <= 0) {
             return true;
         }
-        return price >= lower_circuit_limit_ && price <= upper_circuit_limit_;
+        if (price < lower_circuit_limit_ || price > upper_circuit_limit_) {
+            return false;
+        }
+        const auto delta = price - lower_circuit_limit_;
+        return (delta % kTickSize) == 0;
     }
 
     bool refresh_mtick(bool refresh_bids, bool refresh_asks) {
         bool changed = false;
         if (refresh_bids) {
-            changed = refresh_one_side_from_levels(bids_, true, mtick_.bid, mtick_.bid_size) || changed;
+            changed = refresh_one_side_from_array(bid_levels_, true, mtick_.bid, mtick_.bid_size) || changed;
         }
         if (refresh_asks) {
-            changed = refresh_one_side_from_levels(asks_, false, mtick_.ask, mtick_.ask_size) || changed;
+            changed = refresh_one_side_from_array(ask_levels_, false, mtick_.ask, mtick_.ask_size) || changed;
         }
         return changed;
     }
 
     bool refresh_mtick_incremental(Side side, std::int64_t changed_price) {
+        (void)changed_price;
         if (side == Side::Buy) {
-            return refresh_one_side_incremental(bids_, true, changed_price, mtick_.bid, mtick_.bid_size);
+            return refresh_one_side_from_array(bid_levels_, true, mtick_.bid, mtick_.bid_size);
         }
-        return refresh_one_side_incremental(asks_, false, changed_price, mtick_.ask, mtick_.ask_size);
+        return refresh_one_side_from_array(ask_levels_, false, mtick_.ask, mtick_.ask_size);
     }
 
     bool refresh_mtick_incremental(Side side, std::int64_t changed_price_a, std::int64_t changed_price_b) {
@@ -256,10 +298,10 @@ class InstrumentBook {
         const bool reduce_bids = msg.agg_side == Side::Sell;
         if (reduce_bids) {
             fill_tentative_side_from_levels(
-                bids_, true, msg.last_qty, msg.last_px, tentative_mtick_.bid, tentative_mtick_.bid_size);
+                bid_levels_, true, msg.last_qty, msg.last_px, tentative_mtick_.bid, tentative_mtick_.bid_size);
         } else {
             fill_tentative_side_from_levels(
-                asks_, false, msg.last_qty, msg.last_px, tentative_mtick_.ask, tentative_mtick_.ask_size);
+                ask_levels_, false, msg.last_qty, msg.last_px, tentative_mtick_.ask, tentative_mtick_.ask_size);
         }
 
         mark_timestamp_at(tentative_mtick_, 3);
@@ -279,7 +321,7 @@ class InstrumentBook {
         tick.tnsec[idx] = static_cast<int>(nsecs.count());
     }
 
-    using LevelsMap = std::map<std::int64_t, std::int64_t>;
+    using LevelsArray = std::vector<std::int64_t>;
 
     static void enforce_top_at_last_px_or_worse(bool bids_side, std::int64_t last_px,
                                                 std::array<PxType, kBookDepth>& px_out,
@@ -301,31 +343,37 @@ class InstrumentBook {
         }
     }
 
-    static void fill_tentative_side_from_levels(const LevelsMap& levels, bool bids_side, std::int64_t exec_qty,
-                                                std::int64_t last_px, std::array<PxType, kBookDepth>& px_out,
-                                                std::array<OBSizeType, kBookDepth>& qty_out) {
+    static std::int64_t norm_to_raw(std::int64_t px_norm) { return px_norm * kPriceMultiplier; }
+
+    void fill_tentative_side_from_levels(const LevelsArray& levels, bool bids_side, std::int64_t exec_qty,
+                                         std::int64_t last_px, std::array<PxType, kBookDepth>& px_out,
+                                         std::array<OBSizeType, kBookDepth>& qty_out) const {
         const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
         px_out.fill(sentinel);
         qty_out.fill(0);
+        if (!has_circuit_limits_ || levels.empty()) {
+            return;
+        }
 
         std::int64_t remaining = exec_qty;
         std::int64_t consumed_at_px = 0;
         std::size_t write = 0;
         if (bids_side) {
-            for (auto it = levels.rbegin(); it != levels.rend() && write < kBookDepth; ++it) {
-                std::int64_t level_qty = it->second;
+            for (std::size_t idx = levels.size(); idx > 0 && write < kBookDepth; --idx) {
+                std::int64_t level_qty = levels[idx - 1];
                 if (remaining > 0) {
                     const auto consume = remaining < level_qty ? remaining : level_qty;
                     level_qty -= consume;
                     remaining -= consume;
                     if (consume > 0) {
-                        consumed_at_px = it->first;
+                        consumed_at_px = norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx - 1) * kTickSize);
                     }
                 }
                 if (level_qty <= 0) {
                     continue;
                 }
-                px_out[write] = static_cast<PxType>(it->first);
+                px_out[write] = static_cast<PxType>(
+                    norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx - 1) * kTickSize));
                 qty_out[write] = static_cast<OBSizeType>(level_qty);
                 ++write;
             }
@@ -334,20 +382,21 @@ class InstrumentBook {
             }
             return;
         }
-        for (auto it = levels.begin(); it != levels.end() && write < kBookDepth; ++it) {
-            std::int64_t level_qty = it->second;
+        for (std::size_t idx = 0; idx < levels.size() && write < kBookDepth; ++idx) {
+            std::int64_t level_qty = levels[idx];
             if (remaining > 0) {
                 const auto consume = remaining < level_qty ? remaining : level_qty;
                 level_qty -= consume;
                 remaining -= consume;
                 if (consume > 0) {
-                    consumed_at_px = it->first;
+                    consumed_at_px = norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize);
                 }
             }
             if (level_qty <= 0) {
                 continue;
             }
-            px_out[write] = static_cast<PxType>(it->first);
+            px_out[write] =
+                static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
             qty_out[write] = static_cast<OBSizeType>(level_qty);
             ++write;
         }
@@ -356,239 +405,129 @@ class InstrumentBook {
         }
     }
 
-    static void apply_delta(LevelsMap& levels, std::int64_t price, std::int64_t delta) {
+    bool try_price_to_index(std::int64_t price, std::size_t& out_idx) const {
+        if (!has_circuit_limits_ || price <= 0) {
+            return false;
+        }
+        if (price < lower_circuit_limit_ || price > upper_circuit_limit_) {
+            return false;
+        }
+        const auto delta = price - lower_circuit_limit_;
+        if (delta % kTickSize != 0) {
+            return false;
+        }
+        out_idx = static_cast<std::size_t>(delta / kTickSize);
+        return out_idx < bid_levels_.size();
+    }
+
+    void apply_delta(LevelsArray& levels, std::size_t idx, std::int64_t delta, bool bids_side) {
         if (delta == 0) {
             return;
         }
-        const auto it = levels.find(price);
-        if (it == levels.end()) {
-            if (delta > 0) {
-                levels.emplace(price, delta);
+        const auto prev_qty = levels[idx];
+        const auto next_qty = levels[idx] + delta;
+        if (next_qty <= 0) {
+            levels[idx] = 0;
+            if (bids_side) {
+                if (buy_max_idx_ == static_cast<std::int64_t>(idx)) {
+                    while (buy_max_idx_ >= 0 && bid_levels_[static_cast<std::size_t>(buy_max_idx_)] <= 0) {
+                        --buy_max_idx_;
+                    }
+                }
+            } else {
+                if (sell_min_idx_ == static_cast<std::int64_t>(idx)) {
+                    const auto n = static_cast<std::int64_t>(ask_levels_.size());
+                    while (sell_min_idx_ < n && ask_levels_[static_cast<std::size_t>(sell_min_idx_)] <= 0) {
+                        ++sell_min_idx_;
+                    }
+                    if (sell_min_idx_ >= n) {
+                        sell_min_idx_ = -1;
+                    }
+                }
             }
             return;
         }
-        const auto next_qty = it->second + delta;
-        if (next_qty <= 0) {
-            levels.erase(it);
-            return;
+        levels[idx] = next_qty;
+        if (prev_qty <= 0) {
+            if (bids_side) {
+                if (buy_max_idx_ < 0 || static_cast<std::int64_t>(idx) > buy_max_idx_) {
+                    buy_max_idx_ = static_cast<std::int64_t>(idx);
+                }
+            } else {
+                if (sell_min_idx_ < 0 || static_cast<std::int64_t>(idx) < sell_min_idx_) {
+                    sell_min_idx_ = static_cast<std::int64_t>(idx);
+                }
+            }
         }
-        it->second = next_qty;
     }
 
     void apply_delta(Side side, std::int64_t price, std::int64_t delta) {
         if (!is_price_within_circuit(price)) {
             return;
         }
+        std::size_t idx = 0;
+        if (!try_price_to_index(price, idx)) {
+            return;
+        }
         if (side == Side::Buy) {
-            apply_delta(bids_, price, delta);
+            apply_delta(bid_levels_, idx, delta, true);
             return;
         }
-        apply_delta(asks_, price, delta);
+        apply_delta(ask_levels_, idx, delta, false);
     }
 
-    template <typename ArrPx, typename ArrQty>
-    static void fill_side_from_levels(const LevelsMap& levels, bool bids_side, ArrPx& px_out,
-                                      ArrQty& qty_out) {
-        const auto sentinel_px = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
-        px_out.fill(sentinel_px);
-        qty_out.fill(0);
-
-        std::size_t i = 0;
-        if (bids_side) {
-            for (auto it = levels.rbegin(); it != levels.rend() && i < kBookDepth; ++it, ++i) {
-                px_out[i] = static_cast<PxType>(it->first);
-                qty_out[i] = static_cast<OBSizeType>(it->second);
-            }
-            return;
-        }
-        for (auto it = levels.begin(); it != levels.end() && i < kBookDepth; ++it, ++i) {
-            px_out[i] = static_cast<PxType>(it->first);
-            qty_out[i] = static_cast<OBSizeType>(it->second);
-        }
-    }
-
-    static bool is_valid_price(PxType px, bool bids_side) {
-        return bids_side ? px != std::numeric_limits<PxType>::min() : px != std::numeric_limits<PxType>::max();
-    }
-
-    static bool better_price(std::int64_t lhs, std::int64_t rhs, bool bids_side) {
-        return bids_side ? lhs > rhs : lhs < rhs;
-    }
-
-    static int find_price_index(const std::array<PxType, kBookDepth>& px_out,
-                                const std::array<OBSizeType, kBookDepth>& qty_out, std::int64_t price,
-                                bool bids_side) {
-        for (std::size_t i = 0; i < kBookDepth; ++i) {
-            if (qty_out[i] <= 0 || !is_valid_price(px_out[i], bids_side)) {
-                continue;
-            }
-            if (px_out[i] == price) {
-                return static_cast<int>(i);
-            }
-        }
-        return -1;
-    }
-
-    static std::size_t find_insert_index(const std::array<PxType, kBookDepth>& px_out,
-                                         const std::array<OBSizeType, kBookDepth>& qty_out,
-                                         std::int64_t price, bool bids_side) {
-        for (std::size_t i = 0; i < kBookDepth; ++i) {
-            if (qty_out[i] <= 0 || !is_valid_price(px_out[i], bids_side)) {
-                return i;
-            }
-            if (better_price(price, px_out[i], bids_side)) {
-                return i;
-            }
-        }
-        return kBookDepth;
-    }
-
-    static std::pair<PxType, OBSizeType> best_level(const LevelsMap& levels, bool bids_side) {
-        if (levels.empty()) {
-            return bids_side ? std::pair<PxType, OBSizeType>{std::numeric_limits<PxType>::min(), 0}
-                             : std::pair<PxType, OBSizeType>{std::numeric_limits<PxType>::max(), 0};
-        }
-        if (bids_side) {
-            const auto it = levels.rbegin();
-            return {static_cast<PxType>(it->first), static_cast<OBSizeType>(it->second)};
-        }
-        const auto it = levels.begin();
-        return {static_cast<PxType>(it->first), static_cast<OBSizeType>(it->second)};
-    }
-
-    static std::pair<PxType, OBSizeType> next_worse_than(const LevelsMap& levels, bool bids_side,
-                                                          PxType anchor_price) {
-        const auto sentinel =
-            bids_side ? std::pair<PxType, OBSizeType>{std::numeric_limits<PxType>::min(), 0}
-                      : std::pair<PxType, OBSizeType>{std::numeric_limits<PxType>::max(), 0};
-        if (levels.empty()) {
-            return sentinel;
-        }
-
-        auto it = levels.find(anchor_price);
-        if (it == levels.end()) {
-            it = levels.lower_bound(anchor_price);
-            if (bids_side) {
-                if (it == levels.begin()) {
-                    return sentinel;
-                }
-                --it;
-                return {static_cast<PxType>(it->first), static_cast<OBSizeType>(it->second)};
-            }
-            if (it == levels.end()) {
-                return sentinel;
-            }
-            if (it->first == anchor_price) {
-                ++it;
-            }
-            if (it == levels.end()) {
-                return sentinel;
-            }
-            return {static_cast<PxType>(it->first), static_cast<OBSizeType>(it->second)};
-        }
-
-        if (bids_side) {
-            if (it == levels.begin()) {
-                return sentinel;
-            }
-            --it;
-            return {static_cast<PxType>(it->first), static_cast<OBSizeType>(it->second)};
-        }
-
-        ++it;
-        if (it == levels.end()) {
-            return sentinel;
-        }
-        return {static_cast<PxType>(it->first), static_cast<OBSizeType>(it->second)};
-    }
-
-    static bool normalize_tail(std::array<PxType, kBookDepth>& px_out, std::array<OBSizeType, kBookDepth>& qty_out,
-                               bool bids_side) {
-        const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
-        bool changed = false;
-        for (std::size_t i = 0; i < kBookDepth; ++i) {
-            if (qty_out[i] <= 0) {
-                if (px_out[i] != sentinel) {
-                    px_out[i] = sentinel;
-                    changed = true;
-                }
-                if (qty_out[i] != 0) {
-                    qty_out[i] = 0;
-                    changed = true;
-                }
-            }
-        }
-        return changed;
-    }
-
-    static bool refresh_one_side_incremental(const LevelsMap& levels, bool bids_side, std::int64_t changed_price,
-                                             std::array<PxType, kBookDepth>& px_out,
-                                             std::array<OBSizeType, kBookDepth>& qty_out) {
-        bool changed = normalize_tail(px_out, qty_out, bids_side);
-        const auto set_level = [&](std::size_t i, PxType px, OBSizeType qty) {
-            bool local_changed = false;
-            if (px_out[i] != px) {
-                px_out[i] = px;
-                local_changed = true;
-            }
-            if (qty_out[i] != qty) {
-                qty_out[i] = qty;
-                local_changed = true;
-            }
-            return local_changed;
-        };
-
-        const int old_idx = find_price_index(px_out, qty_out, changed_price, bids_side);
-        const auto it = levels.find(changed_price);
-        const OBSizeType new_qty = (it == levels.end()) ? 0 : static_cast<OBSizeType>(it->second);
-
-        if (old_idx >= 0) {
-            const std::size_t idx = static_cast<std::size_t>(old_idx);
-            if (new_qty > 0) {
-                if (qty_out[idx] != new_qty) {
-                    qty_out[idx] = new_qty;
-                    changed = true;
-                }
-            } else {
-                for (std::size_t i = idx; i + 1 < kBookDepth; ++i) {
-                    changed = set_level(i, px_out[i + 1], qty_out[i + 1]) || changed;
-                }
-                std::pair<PxType, OBSizeType> tail{bids_side ? std::numeric_limits<PxType>::min()
-                                                              : std::numeric_limits<PxType>::max(),
-                                                   0};
-                if constexpr (kBookDepth == 1) {
-                    tail = best_level(levels, bids_side);
-                } else {
-                    const auto anchor_qty = qty_out[kBookDepth - 2];
-                    if (anchor_qty > 0) {
-                        tail = next_worse_than(levels, bids_side, px_out[kBookDepth - 2]);
-                    }
-                }
-                const auto [tail_px, tail_qty] = tail;
-                changed = set_level(kBookDepth - 1, tail_px, tail_qty) || changed;
-            }
-            return changed;
-        }
-
-        if (new_qty <= 0) {
-            return changed;
-        }
-        const std::size_t insert_idx = find_insert_index(px_out, qty_out, changed_price, bids_side);
-        if (insert_idx >= kBookDepth) {
-            return changed;
-        }
-        for (std::size_t i = kBookDepth - 1; i > insert_idx; --i) {
-            changed = set_level(i, px_out[i - 1], qty_out[i - 1]) || changed;
-        }
-        changed = set_level(insert_idx, changed_price, new_qty) || changed;
-        return changed;
-    }
-
-    static bool refresh_one_side_from_levels(const LevelsMap& levels, bool bids_side, std::array<PxType, kBookDepth>& px_out,
-                                             std::array<OBSizeType, kBookDepth>& qty_out) {
+    bool refresh_one_side_from_array(const LevelsArray& levels, bool bids_side, std::array<PxType, kBookDepth>& px_out,
+                                     std::array<OBSizeType, kBookDepth>& qty_out) const {
         std::array<PxType, kBookDepth> next_px{};
         std::array<OBSizeType, kBookDepth> next_qty{};
-        fill_side_from_levels(levels, bids_side, next_px, next_qty);
+        const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
+        next_px.fill(sentinel);
+        next_qty.fill(0);
+
+        if (!has_circuit_limits_ || levels.empty()) {
+            bool changed = false;
+            for (std::size_t i = 0; i < kBookDepth; ++i) {
+                if (px_out[i] != next_px[i]) {
+                    px_out[i] = next_px[i];
+                    changed = true;
+                }
+                if (qty_out[i] != next_qty[i]) {
+                    qty_out[i] = next_qty[i];
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        std::size_t w = 0;
+        if (bids_side) {
+            if (buy_max_idx_ >= 0) {
+                for (std::int64_t idx = buy_max_idx_; idx >= 0 && w < kBookDepth; --idx) {
+                    const auto q = levels[static_cast<std::size_t>(idx)];
+                    if (q <= 0) {
+                        continue;
+                    }
+                    next_px[w] = static_cast<PxType>(
+                        norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
+                    next_qty[w] = static_cast<OBSizeType>(q);
+                    ++w;
+                }
+            }
+        } else {
+            if (sell_min_idx_ >= 0) {
+                for (std::size_t idx = static_cast<std::size_t>(sell_min_idx_); idx < levels.size() && w < kBookDepth;
+                     ++idx) {
+                    const auto q = levels[idx];
+                    if (q <= 0) {
+                        continue;
+                    }
+                    next_px[w] =
+                        static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
+                    next_qty[w] = static_cast<OBSizeType>(q);
+                    ++w;
+                }
+            }
+        }
         bool changed = false;
         for (std::size_t i = 0; i < kBookDepth; ++i) {
             if (px_out[i] != next_px[i]) {
@@ -603,8 +542,25 @@ class InstrumentBook {
         return changed;
     }
 
-    LevelsMap bids_;
-    LevelsMap asks_;
+    void recompute_top_indices() {
+        buy_max_idx_ = -1;
+        for (std::size_t i = bid_levels_.size(); i > 0; --i) {
+            if (bid_levels_[i - 1] > 0) {
+                buy_max_idx_ = static_cast<std::int64_t>(i - 1);
+                break;
+            }
+        }
+        sell_min_idx_ = -1;
+        for (std::size_t i = 0; i < ask_levels_.size(); ++i) {
+            if (ask_levels_[i] > 0) {
+                sell_min_idx_ = static_cast<std::int64_t>(i);
+                break;
+            }
+        }
+    }
+
+    LevelsArray bid_levels_;
+    LevelsArray ask_levels_;
     MTICK mtick_{};
     MTICK tentative_mtick_{};
     bool has_tentative_mtick_{false};
@@ -613,6 +569,8 @@ class InstrumentBook {
     bool has_circuit_limits_{false};
     std::int64_t upper_circuit_limit_{0};
     std::int64_t lower_circuit_limit_{0};
+    std::int64_t buy_max_idx_{-1};
+    std::int64_t sell_min_idx_{-1};
     SecurityStatus security_status_{SecurityStatus::Unknown};
     SecTrdStatus sec_trd_status_{SecTrdStatus::Unknown};
 };
@@ -623,8 +581,9 @@ class PriceLevelBooks {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
-        book.add(msg.side, msg.price, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
+        const auto px = normalize_price(msg.price);
+        book.add(msg.side, px, msg.display_qty);
+        if (!book.refresh_mtick_incremental(msg.side, px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -635,8 +594,10 @@ class PriceLevelBooks {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
-        book.modify(msg.side, msg.prev_price, msg.prev_display_qty, msg.price, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, msg.prev_price, msg.price)) {
+        const auto prev_px = normalize_price(msg.prev_price);
+        const auto px = normalize_price(msg.price);
+        book.modify(msg.side, prev_px, msg.prev_display_qty, px, msg.display_qty);
+        if (!book.refresh_mtick_incremental(msg.side, prev_px, px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -647,8 +608,9 @@ class PriceLevelBooks {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
-        book.modify_same_priority(msg.side, msg.price, msg.prev_display_qty, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
+        const auto px = normalize_price(msg.price);
+        book.modify_same_priority(msg.side, px, msg.prev_display_qty, msg.display_qty);
+        if (!book.refresh_mtick_incremental(msg.side, px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -659,8 +621,9 @@ class PriceLevelBooks {
         auto& book = ensure_book(msg.security_id);
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
-        book.remove(msg.side, msg.price, msg.display_qty);
-        if (!book.refresh_mtick_incremental(msg.side, msg.price)) {
+        const auto px = normalize_price(msg.price);
+        book.remove(msg.side, px, msg.display_qty);
+        if (!book.refresh_mtick_incremental(msg.side, px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -676,8 +639,9 @@ class PriceLevelBooks {
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         const auto exec_px = (book.is_auction_freeze() && msg.price != 0) ? msg.price : msg.last_px;
-        book.partial_exec(msg.side, exec_px, msg.last_qty);
-        if (!book.refresh_mtick_incremental(msg.side, exec_px)) {
+        const auto px = normalize_price(exec_px);
+        book.partial_exec(msg.side, px, msg.last_qty);
+        if (!book.refresh_mtick_incremental(msg.side, px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -689,8 +653,9 @@ class PriceLevelBooks {
         book.mark_seq(msg.seq_no);
         book.mark_processing_start();
         const auto exec_px = (book.is_auction_freeze() && msg.price != 0) ? msg.price : msg.last_px;
-        book.full_exec(msg.side, exec_px, msg.last_qty);
-        if (!book.refresh_mtick_incremental(msg.side, exec_px)) {
+        const auto px = normalize_price(exec_px);
+        book.full_exec(msg.side, px, msg.last_qty);
+        if (!book.refresh_mtick_incremental(msg.side, px)) {
             return std::nullopt;
         }
         book.mark_publish_time();
@@ -733,6 +698,8 @@ class PriceLevelBooks {
     }
 
    private:
+    static std::int64_t normalize_price(std::int64_t raw_price) noexcept { return raw_price / kPriceMultiplier; }
+
     InstrumentBook& ensure_book(std::int64_t security_id) {
         auto& book = books_[security_id];
         book.set_security_id(security_id);
