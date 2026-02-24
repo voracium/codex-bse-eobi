@@ -79,6 +79,29 @@ Dataset:
 | missing | 4 |
 | extra_actual | 6433 |
 
+### 2026-02-24T16:21:21+05:30 | commit `1c011b8`
+
+Dataset:
+- raw: `cpp_price_levels/testcases/532309_raw_ticks.log`
+- ref: `cpp_price_levels/testcases/dinfra_tbt_532309.csv`
+- mode: `strict`
+
+| Type | Count | Avg(ns) | Min(ns) | P50(ns) | P90(ns) | P95(ns) | P99(ns) | Max(ns) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| overall | 952656 | 56 | 20 | 55 | 71 | 77 | 88 | 13403 |
+| N | 295058 | 52 | 24 | 51 | 63 | 67 | 76 | 3000 |
+| M | 339289 | 62 | 31 | 61 | 78 | 83 | 94 | 13403 |
+| X | 307444 | 53 | 21 | 52 | 64 | 69 | 78 | 11063 |
+| F | 2817 | 63 | 23 | 59 | 79 | 96 | 156 | 660 |
+| T | 3561 | 50 | 25 | 45 | 64 | 73 | 131 | 272 |
+| E | 4487 | 55 | 20 | 45 | 82 | 117 | 189 | 503 |
+
+| Validation Metric | Value |
+|---|---:|
+| mismatches | 36 |
+| missing | 4 |
+| extra_actual | 6433 |
+
 ### 2026-02-24T15:14:28+05:30 | commit `499ae47`
 
 Dataset:
