@@ -14,10 +14,8 @@
 namespace eobi::basic {
 
 #if defined(__GNUC__) || defined(__clang__)
-#define EOBI_LIKELY(x) (__builtin_expect(!!(x), 1))
 #define EOBI_UNLIKELY(x) (__builtin_expect(!!(x), 0))
 #else
-#define EOBI_LIKELY(x) (x)
 #define EOBI_UNLIKELY(x) (x)
 #endif
 
@@ -159,6 +157,7 @@ class InstrumentBook {
     }
 
     void mark_seq(std::uint32_t seq_no) noexcept {
+        has_tentative_mtick_ = false;
         if (seq_no > 0) {
             seq_no_ = seq_no;
             mtick_.seqNo = seq_no_;
@@ -174,13 +173,12 @@ class InstrumentBook {
 
         const bool reduce_bids = msg.agg_side_value() == Side::Sell;
         if (reduce_bids) {
-            fill_tentative_side_from_levels(bid_levels_, true, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.bid,
-                                            tentative_mtick_.bid_size);
+            fill_tentative_side_from_levels(
+                bid_levels_, true, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.bid, tentative_mtick_.bid_size);
         } else {
-            fill_tentative_side_from_levels(ask_levels_, false, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.ask,
-                                            tentative_mtick_.ask_size);
+            fill_tentative_side_from_levels(
+                ask_levels_, false, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.ask, tentative_mtick_.ask_size);
         }
-
         mark_timestamp_at(tentative_mtick_, 3);
         has_tentative_mtick_ = true;
         tentative_seq_no_ = seq_no_;
@@ -202,26 +200,69 @@ class InstrumentBook {
     using NonZeroBits = detail::NonZeroBits;
     using LevelBitmap = detail::LevelBitmap;
 
-    static void enforce_top_at_last_px_or_worse(bool bids_side, std::int64_t last_px, std::array<PxType, kBookDepth>& px_out,
-                                                std::array<OBSizeType, kBookDepth>& qty_out) {
-        const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
-        auto is_better_than_last = [&](PxType px) {
-            if (px == sentinel) {
-                return false;
-            }
-            return bids_side ? (px > last_px) : (px < last_px);
-        };
-        while (qty_out[0] > 0 && is_better_than_last(px_out[0])) {
-            for (std::size_t i = 0; i + 1 < kBookDepth; ++i) {
-                px_out[i] = px_out[i + 1];
-                qty_out[i] = qty_out[i + 1];
-            }
-            px_out[kBookDepth - 1] = sentinel;
-            qty_out[kBookDepth - 1] = 0;
-        }
-    }
-
     static std::int64_t norm_to_raw(std::int64_t px_norm) { return px_norm * kPriceMultiplier; }
+
+    void anchor_execsummary_top_from_core(const LevelsArray& levels, bool bids_side, std::int64_t last_px,
+                                          std::array<PxType, kBookDepth>& px_out,
+                                          std::array<OBSizeType, kBookDepth>& qty_out) const {
+        const auto sentinel = bids_side ? std::numeric_limits<PxType>::min() : std::numeric_limits<PxType>::max();
+        std::array<PxType, kBookDepth> next_px{};
+        std::array<OBSizeType, kBookDepth> next_qty{};
+        next_px.fill(sentinel);
+        next_qty.fill(0);
+
+        std::size_t w = 0;
+        bool anchored = false;
+        std::size_t anchor_idx = 0;
+        if (last_px > 0) {
+            const auto last_px_norm = last_px / kPriceMultiplier;
+            const auto delta = last_px_norm - lower_circuit_limit_;
+            if (delta >= 0 && (delta % kTickSize) == 0) {
+                const auto idx = static_cast<std::size_t>(delta / kTickSize);
+                if (idx < levels.size() && levels[idx] > 0) {
+                    next_px[w] = static_cast<PxType>(last_px);
+                    next_qty[w] = static_cast<OBSizeType>(levels[idx]);
+                    ++w;
+                    anchored = true;
+                    anchor_idx = idx;
+                }
+            }
+        }
+
+        if (!anchored) {
+            return;
+        }
+
+        if (bids_side) {
+            if (anchor_idx > 0) {
+                auto idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, static_cast<std::int64_t>(anchor_idx) - 1, levels.size());
+                while (idx >= 0 && w < kBookDepth) {
+                    const auto q = levels[static_cast<std::size_t>(idx)];
+                    if (q > 0) {
+                        next_px[w] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
+                        next_qty[w] = static_cast<OBSizeType>(q);
+                        ++w;
+                    }
+                    idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
+                }
+            }
+        } else {
+            auto idx = LevelBitmap::find_next_set_bit(ask_nonzero_, anchor_idx + 1, levels.size());
+            while (idx >= 0 && w < kBookDepth) {
+                const auto q = levels[static_cast<std::size_t>(idx)];
+                if (q > 0) {
+                    next_px[w] = static_cast<PxType>(
+                        norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
+                    next_qty[w] = static_cast<OBSizeType>(q);
+                    ++w;
+                }
+                idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
+            }
+        }
+
+        px_out = next_px;
+        qty_out = next_qty;
+    }
 
     void fill_tentative_side_from_levels(const LevelsArray& levels, bool bids_side, std::int64_t exec_qty, std::int64_t last_px,
                                          std::array<PxType, kBookDepth>& px_out, std::array<OBSizeType, kBookDepth>& qty_out) const {
@@ -260,7 +301,7 @@ class InstrumentBook {
                 idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
             }
             if (consumed_at_px != 0 && consumed_at_px != last_px) {
-                enforce_top_at_last_px_or_worse(true, last_px, px_out, qty_out);
+                anchor_execsummary_top_from_core(levels, true, last_px, px_out, qty_out);
             }
             return;
         }
@@ -288,7 +329,7 @@ class InstrumentBook {
             idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
         }
         if (consumed_at_px != 0 && consumed_at_px != last_px) {
-            enforce_top_at_last_px_or_worse(false, last_px, px_out, qty_out);
+            anchor_execsummary_top_from_core(levels, false, last_px, px_out, qty_out);
         }
     }
 

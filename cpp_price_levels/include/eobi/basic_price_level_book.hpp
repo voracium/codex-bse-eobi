@@ -75,11 +75,8 @@ class PriceLevelBooks {
         const auto exec_px = (book.is_auction_freeze() && msg.price_value() != 0) ? msg.price_value() : msg.last_px_value();
         const auto px = normalize_price(exec_px);
         book.partial_exec(msg.side_value(), px, msg.last_qty_value());
-        if (!book.refresh_mtick_incremental(msg.side_value(), px)) {
-            return std::nullopt;
-        }
-        book.mark_publish_time();
-        return book.mtick();
+        (void)book.refresh_mtick_incremental(msg.side_value(), px);
+        return std::nullopt;
     }
 
     std::optional<MTICK> apply(const FullOrderExecution& msg) {
@@ -89,11 +86,8 @@ class PriceLevelBooks {
         const auto exec_px = (book.is_auction_freeze() && msg.price_value() != 0) ? msg.price_value() : msg.last_px_value();
         const auto px = normalize_price(exec_px);
         book.full_exec(msg.side_value(), px, msg.last_qty_value());
-        if (!book.refresh_mtick_incremental(msg.side_value(), px)) {
-            return std::nullopt;
-        }
-        book.mark_publish_time();
-        return book.mtick();
+        (void)book.refresh_mtick_incremental(msg.side_value(), px);
+        return std::nullopt;
     }
 
     std::optional<MTICK> apply(const ExecutionSummary& msg) {
@@ -102,8 +96,7 @@ class PriceLevelBooks {
         if (!book.is_continuous_trading()) {
             return std::nullopt;
         }
-        const auto& tentative = book.apply_execution_summary_tentative(msg);
-        return tentative;
+        return book.apply_execution_summary_tentative(msg);
     }
 
     std::optional<MTICK> apply(const InstrumentInfo& msg) {

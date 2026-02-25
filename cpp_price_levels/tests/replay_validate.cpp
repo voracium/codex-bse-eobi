@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <sstream>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -381,6 +382,16 @@ void print_row(const Row& r, const char* label) {
     std::cout << "\n";
 }
 
+std::string row_to_csv_line(const Row& r, std::int64_t security_id) {
+    std::ostringstream out;
+    out << "0,0," << r.seq << "," << security_id << "," << r.type << ",N";
+    for (std::size_t i = 0; i < kDepth; ++i) {
+        out << "," << r.bid_size[i] << "," << r.bid_px[i] << "," << r.ask_px[i] << "," << r.ask_size[i];
+    }
+    out << ",0,0,0,0,-1,-1,-1,-1,0,0,0,0,0,0,0,0";
+    return out.str();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -569,6 +580,8 @@ int main(int argc, char** argv) {
                               << ", actual type=" << actual[actual_idx].type << ")\n";
                     print_row(expected[i], " expected");
                     print_row(actual[actual_idx], " actual  ");
+                    std::cout << " expected_csv: " << row_to_csv_line(expected[i], security_id) << "\n";
+                    std::cout << " actual_csv  : " << row_to_csv_line(actual[actual_idx], security_id) << "\n";
                 }
             }
         }
@@ -613,6 +626,8 @@ int main(int argc, char** argv) {
                     std::cout << "Mismatch at seq=" << expected[i].seq << " type=" << expected[i].type << "\n";
                     print_row(expected[i], " expected");
                     print_row(actual[actual_idx], " actual  ");
+                    std::cout << " expected_csv: " << row_to_csv_line(expected[i], security_id) << "\n";
+                    std::cout << " actual_csv  : " << row_to_csv_line(actual[actual_idx], security_id) << "\n";
                 }
             }
         }
