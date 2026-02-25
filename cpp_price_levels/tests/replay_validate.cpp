@@ -37,7 +37,6 @@ using eobi::basic::SecurityStatus;
 using eobi::basic::Side;
 
 constexpr std::size_t kDepth = eobi::basic::kBookDepth;
-constexpr std::int64_t kPriceScale = 1'000'000;
 
 struct Row {
     std::int64_t seq{};
@@ -144,10 +143,10 @@ Row to_row(std::int64_t seq, char type, const MTICK& top) {
         row.bid_size[i] = top.bid_size[i];
         row.ask_size[i] = top.ask_size[i];
         if (top.bid_size[i] > 0) {
-            row.bid_px[i] = top.bid[i] / kPriceScale;
+            row.bid_px[i] = top.bid[i];
         }
         if (top.ask_size[i] > 0) {
-            row.ask_px[i] = top.ask[i] / kPriceScale;
+            row.ask_px[i] = top.ask[i];
         }
     }
     return row;

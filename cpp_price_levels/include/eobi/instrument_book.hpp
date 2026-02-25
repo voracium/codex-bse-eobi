@@ -170,14 +170,15 @@ class InstrumentBook {
     const MTICK& apply_execution_summary_tentative(const ExecutionSummary& msg) {
         tentative_mtick_ = mtick_;
         mark_timestamp_at(tentative_mtick_, 2);
+        const auto last_px = msg.last_px_value() / kPriceMultiplier;
 
         const bool reduce_bids = msg.agg_side_value() == Side::Sell;
         if (reduce_bids) {
             fill_tentative_side_from_levels(
-                bid_levels_, true, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.bid, tentative_mtick_.bid_size);
+                bid_levels_, true, msg.last_qty_value(), last_px, tentative_mtick_.bid, tentative_mtick_.bid_size);
         } else {
             fill_tentative_side_from_levels(
-                ask_levels_, false, msg.last_qty_value(), msg.last_px_value(), tentative_mtick_.ask, tentative_mtick_.ask_size);
+                ask_levels_, false, msg.last_qty_value(), last_px, tentative_mtick_.ask, tentative_mtick_.ask_size);
         }
         mark_timestamp_at(tentative_mtick_, 3);
         has_tentative_mtick_ = true;
@@ -200,8 +201,6 @@ class InstrumentBook {
     using NonZeroBits = detail::NonZeroBits;
     using LevelBitmap = detail::LevelBitmap;
 
-    static std::int64_t norm_to_raw(std::int64_t px_norm) { return px_norm * kPriceMultiplier; }
-
     void anchor_execsummary_top_from_core(const LevelsArray& levels, bool bids_side, std::int64_t last_px,
                                           std::array<PxType, kBookDepth>& px_out,
                                           std::array<OBSizeType, kBookDepth>& qty_out) const {
@@ -215,8 +214,7 @@ class InstrumentBook {
         bool anchored = false;
         std::size_t anchor_idx = 0;
         if (last_px > 0) {
-            const auto last_px_norm = last_px / kPriceMultiplier;
-            const auto delta = last_px_norm - lower_circuit_limit_;
+            const auto delta = last_px - lower_circuit_limit_;
             if (delta >= 0 && (delta % kTickSize) == 0) {
                 const auto idx = static_cast<std::size_t>(delta / kTickSize);
                 if (idx < levels.size() && levels[idx] > 0) {
@@ -239,7 +237,7 @@ class InstrumentBook {
                 while (idx >= 0 && w < kBookDepth) {
                     const auto q = levels[static_cast<std::size_t>(idx)];
                     if (q > 0) {
-                        next_px[w] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
+                        next_px[w] = static_cast<PxType>(lower_circuit_limit_ + idx * kTickSize);
                         next_qty[w] = static_cast<OBSizeType>(q);
                         ++w;
                     }
@@ -251,8 +249,7 @@ class InstrumentBook {
             while (idx >= 0 && w < kBookDepth) {
                 const auto q = levels[static_cast<std::size_t>(idx)];
                 if (q > 0) {
-                    next_px[w] = static_cast<PxType>(
-                        norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
+                    next_px[w] = static_cast<PxType>(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize);
                     next_qty[w] = static_cast<OBSizeType>(q);
                     ++w;
                 }
@@ -288,14 +285,14 @@ class InstrumentBook {
                     level_qty -= consume;
                     remaining -= consume;
                     if (consume > 0) {
-                        consumed_at_px = norm_to_raw(lower_circuit_limit_ + idx * kTickSize);
+                        consumed_at_px = lower_circuit_limit_ + idx * kTickSize;
                     }
                 }
                 if (level_qty <= 0) {
                     idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
                     continue;
                 }
-                px_out[write] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
+                px_out[write] = static_cast<PxType>(lower_circuit_limit_ + idx * kTickSize);
                 qty_out[write] = static_cast<OBSizeType>(level_qty);
                 ++write;
                 idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
@@ -316,14 +313,14 @@ class InstrumentBook {
                 level_qty -= consume;
                 remaining -= consume;
                 if (consume > 0) {
-                    consumed_at_px = norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize);
+                    consumed_at_px = lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize;
                 }
             }
             if (level_qty <= 0) {
                 idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
                 continue;
             }
-            px_out[write] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
+            px_out[write] = static_cast<PxType>(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize);
             qty_out[write] = static_cast<OBSizeType>(level_qty);
             ++write;
             idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
@@ -433,7 +430,7 @@ class InstrumentBook {
                 std::int64_t idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, buy_max_idx_, levels.size());
                 while (idx >= 0 && w < kBookDepth) {
                     const auto q = levels[static_cast<std::size_t>(idx)];
-                    next_px[w] = static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + idx * kTickSize));
+                    next_px[w] = static_cast<PxType>(lower_circuit_limit_ + idx * kTickSize);
                     next_qty[w] = static_cast<OBSizeType>(q);
                     ++w;
                     idx = LevelBitmap::find_prev_set_bit(bid_nonzero_, idx - 1, levels.size());
@@ -444,8 +441,7 @@ class InstrumentBook {
                 std::int64_t idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(sell_min_idx_), levels.size());
                 while (idx >= 0 && w < kBookDepth) {
                     const auto q = levels[idx];
-                    next_px[w] =
-                        static_cast<PxType>(norm_to_raw(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize));
+                    next_px[w] = static_cast<PxType>(lower_circuit_limit_ + static_cast<std::int64_t>(idx) * kTickSize);
                     next_qty[w] = static_cast<OBSizeType>(q);
                     ++w;
                     idx = LevelBitmap::find_next_set_bit(ask_nonzero_, static_cast<std::size_t>(idx + 1), levels.size());
